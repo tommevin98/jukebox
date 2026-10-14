@@ -62,6 +62,10 @@
   .results li { grid-template-columns: 44px 1fr auto; padding: 8px 10px; border-top: 1px solid var(--line); }
   .results li:first-child { border-top: 0; }
   .results button { padding: 7px 12px; font-size: 14px; }
+  .listen { display: flex; align-items: center; gap: 12px; }
+  .listen button { min-width: 116px; }
+  .listen input[type=range] { flex: 1; min-width: 0; accent-color: var(--accent); padding: 0; border: 0; background: none; }
+  #listenCard[hidden] { display: none; }
   .offline { text-align: center; padding: 32px 16px; color: var(--muted); }
 </style>
 </head>
@@ -90,6 +94,14 @@
     <p class="votehint" id="votehint"></p>
   </section>
 
+  <section class="card" id="listenCard" hidden>
+    <div class="listen">
+      <button id="listenBtn">🎧 Listen</button>
+      <input type="range" id="vol" min="0" max="1" step="0.01" value="0.8" aria-label="Volume">
+    </div>
+    <p class="hint" id="listenHint">Hear the music right here — runs a few seconds behind.</p>
+  </section>
+
   <section class="card" id="requestCard">
     <div class="field">
       <label for="name">Your name <span style="font-weight:400">(optional)</span></label>
@@ -114,6 +126,7 @@
 <script>
   const $ = (id) => document.getElementById(id);
   let state = null, fetchedAt = 0, failures = 0;
+  let audio = null, hls = null, vol = 0.8;
 
   // Two ways this page runs: served by MixMic through the tunnel (API is relative), or from GitHub Pages
   // with the secret after "#" — then we look up MixMic's current tunnel address in the repo's tunnel.json.
@@ -202,6 +215,13 @@
     $("addBtn").textContent = state.search ? "Search" : "Add";
     $("hint").textContent = state.search ? "Type a song or artist, then tap Add on a result."
       : "In Spotify: ⋯ on a song → Share → Copy song link.";
+
+    $("listenCard").hidden = !state.broadcast;
+    if (!state.broadcast && audio) stopListening("The broadcast has ended.");
+    else if (!audio) $("listenHint").textContent = state.streamReady
+      ? `Hear the music right here — runs a few seconds behind.${state.listeners ? ` ${state.listeners} listening.` : ""}`
+      : "The broadcast is starting…";
+    $("listenBtn").disabled = !audio && !state.streamReady;
 
     const q = state.queue || [];
     $("queue").innerHTML = q.length ? q.map((t, i) => {
@@ -308,6 +328,48 @@
   if (!SECRET && location.hostname.endsWith(".github.io")) {
     $("title").textContent = "This link is missing its code"; $("artist").textContent = "Ask for the full link (it ends with #…).";
   }
+  // Live audio: native HLS where supported (Safari, iOS), hls.js elsewhere.
+  try { vol = parseFloat(localStorage.getItem("jbVol") || "0.8"); } catch (e) {}
+  $("vol").value = vol;
+  $("vol").addEventListener("input", () => {
+    vol = parseFloat($("vol").value);
+    if (audio) audio.volume = vol;
+    try { localStorage.setItem("jbVol", vol); } catch (e) {}
+  });
+  const loadHls = () => window.Hls ? Promise.resolve() : new Promise((ok, fail) => {
+    const sc = document.createElement("script");
+    sc.src = "https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js";
+    sc.onload = ok; sc.onerror = fail; document.head.appendChild(sc);
+  });
+  function stopListening(msg) {
+    if (hls) { hls.destroy(); hls = null; }
+    if (audio) { audio.pause(); audio.removeAttribute("src"); audio.load(); audio = null; }
+    $("listenBtn").textContent = "🎧 Listen";
+    if (msg) $("listenHint").textContent = msg;
+  }
+  async function startListening() {
+    const src = API + "live.m3u8";
+    audio = new Audio();
+    audio.volume = vol;
+    $("listenBtn").textContent = "⏹ Stop";
+    $("listenHint").textContent = "Connecting…";
+    try {
+      if (audio.canPlayType("application/vnd.apple.mpegurl")) {
+        audio.src = src;
+      } else {
+        await loadHls();
+        if (!window.Hls || !Hls.isSupported()) throw new Error("This browser can't play the stream.");
+        hls = new Hls({ liveSyncDurationCount: 2, manifestLoadingMaxRetry: 6, levelLoadingMaxRetry: 6 });
+        hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) stopListening("Lost the stream — press Listen to retry."); });
+        hls.loadSource(src);
+        hls.attachMedia(audio);
+      }
+      await audio.play();
+      $("listenHint").textContent = "Listening live 🎶";
+    } catch (err) { stopListening(err.message || "Couldn't start the stream."); }
+  }
+  $("listenBtn").addEventListener("click", () => audio ? stopListening("Stopped.") : startListening());
+
   resolveAPI().then(refresh);
   setInterval(refresh, 2500);
   setInterval(tick, 500);

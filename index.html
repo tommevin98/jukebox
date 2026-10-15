@@ -17,7 +17,21 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
     font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; }
-  main { max-width: 520px; margin: 0 auto; padding: 24px 16px 48px; }
+  main { max-width: 1000px; margin: 0 auto; padding: 24px 16px 48px; display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 20px; }
+  main > .col { min-width: 0; }
+  @media (min-width: 880px) {
+    main { grid-template-columns: minmax(0, 520px) minmax(0, 1fr); }
+    main > header { grid-column: 1 / -1; }
+    #chatCard { position: sticky; top: 16px; align-self: start; }
+  }
+  .chatlog { height: 360px; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; padding-right: 4px; margin-bottom: 10px; overscroll-behavior: contain; }
+  @media (max-width: 879px) { .chatlog { height: 260px; } }
+  .cm { font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+  .cm b { font-weight: 650; margin-right: 4px; }
+  .cm.host b { color: var(--accent); }
+  .cm.mine b::after { content: " (you)"; font-weight: 400; color: var(--muted); }
+  .cm time { color: var(--muted); font-size: 11px; margin-left: 6px; font-variant-numeric: tabular-nums; }
+  .cm.system { color: var(--muted); font-size: 13px; text-align: center; }
   header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
   h1 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
   .pill { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: var(--line); color: var(--muted); }
@@ -75,6 +89,7 @@
     <h1 id="heading">Office Jukebox</h1>
     <span id="status" class="pill">Connecting…</span>
   </header>
+  <div class="col">
 
   <section class="card" id="nowCard">
     <div class="now">
@@ -105,7 +120,7 @@
   <section class="card" id="requestCard">
     <div class="field">
       <label for="name">Your name <span style="font-weight:400">(optional)</span></label>
-      <input id="name" maxlength="24" placeholder="Shown next to songs you add" autocomplete="nickname">
+      <input id="name" maxlength="24" placeholder="Shown next to your songs and messages" autocomplete="nickname">
     </div>
     <label for="url">Request a song</label>
     <form class="row" id="form">
@@ -121,6 +136,17 @@
     <h2>Up next</h2>
     <ol id="queue"><li class="empty" style="display:block">No requests yet — add one!</li></ol>
   </section>
+  </div>
+
+  <aside class="card" id="chatCard" hidden aria-label="Chat">
+    <h2>Chat</h2>
+    <div class="chatlog" id="chatlog" aria-live="polite"><div class="cm system" id="chatEmpty">No messages yet — say hi.</div></div>
+    <form class="row" id="chatForm">
+      <input id="chatText" maxlength="280" placeholder="Say something…" autocomplete="off" enterkeyhint="send" aria-label="Message">
+      <button type="submit" id="chatSend">Send</button>
+    </form>
+    <p class="msg" id="chatMsg" role="status"></p>
+  </aside>
 </main>
 
 <script>
@@ -207,7 +233,7 @@
     $("nextBtn").textContent = v.cooldown > 0 ? `⏳ ${fmt(v.cooldown)}` : "⏭ Next" + (need && v.next ? ` ${v.next}/${v.needed}` : "");
     $("nextBtn").disabled = !state.next || v.votedNext || v.cooldown > 0;
     $("nextBtn").classList.toggle("voted", !!v.votedNext);
-    $("votehint").textContent = v.cooldown > 0 ? "You've skipped 3 times — skipping is paused for you for a bit."
+    $("votehint").textContent = v.cooldown > 0 ? `You've voted to skip ${(state.limits && state.limits.skipLimit) || 3} times — skipping is paused for you for a bit.`
       : need ? `${v.needed} people need to vote to skip or pause.` : "";
     $("url").disabled = $("addBtn").disabled = !state.requests;
     $("url").placeholder = !state.requests ? "Requests are paused right now"
@@ -228,7 +254,7 @@
       const th = safeUrl(t.thumb);
       return `<li class="q"><div class="thumb" style="${th ? `background-image:url('${th}')` : ""}"></div>
         <div style="min-width:0"><div class="title" style="font-size:15px">${i + 1}. ${esc(t.title)}</div>
-        <div class="by">${t.mine ? "added by you" : "added by " + esc(t.by)}</div></div>
+        <div class="by">${t.locked ? "playing next · added by " + esc(t.by) : t.mine ? "added by you" : "added by " + esc(t.by)}</div></div>
         ${t.mine ? `<button type="button" class="remove" data-uid="${esc(t.uid)}">Remove</button>` : "<span></span>"}</li>`;
     }).join("") : `<li class="empty" style="display:block">No requests yet — add one!</li>`;
     tick();
@@ -372,6 +398,57 @@
 
   resolveAPI().then(refresh);
   setInterval(refresh, 2500);
+
+  // Live chat: poll for new messages every 1.5 s.
+  let chatLast = 0, chatFirst = 0, chatBusy = false;
+  const chatSay = (text, kind) => { $("chatMsg").textContent = text; $("chatMsg").className = "msg " + (kind || ""); };
+  function renderMsg(m) {
+    const t = new Date(m.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    if (m.kind === "system") return `<div class="cm system">${esc(m.text)}</div>`;
+    return `<div class="cm ${m.kind}${m.mine ? " mine" : ""}"><b>${esc(m.name)}${m.kind === "host" ? " · host" : ""}</b>${esc(m.text)}<time>${t}</time></div>`;
+  }
+  async function pollChat() {
+    if (chatBusy || (SECRET && !API)) return;
+    chatBusy = true;
+    try {
+      const r = await fetch(API + "api/chat?after=" + chatLast, { cache: "no-store", headers: { "X-Client": client } });
+      if (!r.ok) return;
+      const j = await r.json();
+      $("chatCard").hidden = !j.enabled;
+      const log = $("chatlog");
+      // Host cleared the chat, or MixMic restarted: start over.
+      if (j.last < chatLast || (chatFirst && j.first > chatFirst)) {
+        log.innerHTML = '<div class="cm system" id="chatEmpty">No messages yet — say hi.</div>';
+        chatLast = 0; chatFirst = 0;
+        chatBusy = false; return pollChat();
+      }
+      const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+      for (const m of j.messages) {
+        if (m.id <= chatLast) continue;
+        const empty = $("chatEmpty"); if (empty) empty.remove();
+        log.insertAdjacentHTML("beforeend", renderMsg(m));
+        chatLast = m.id;
+        if (!chatFirst) chatFirst = m.id;
+      }
+      while (log.children.length > 200) log.firstElementChild.remove();
+      if (atBottom) log.scrollTop = log.scrollHeight;
+    } catch (e) {} finally { chatBusy = false; }
+  }
+  $("chatText").addEventListener("input", () => chatSay("", ""));
+  $("chatForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = $("chatText").value.trim();
+    if (!text) { chatSay("Type a message first.", "err"); return; }
+    $("chatSend").disabled = true;
+    try {
+      await post("api/chat", { text, name: $("name").value });
+      $("chatText").value = "";
+      await pollChat();
+      $("chatlog").scrollTop = $("chatlog").scrollHeight;
+    } catch (err) { chatSay(err.message, "err"); }
+    finally { $("chatSend").disabled = false; }
+  });
+  setInterval(pollChat, 1500);
   setInterval(tick, 500);
 </script>
 </body>

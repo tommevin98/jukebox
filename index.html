@@ -32,6 +32,20 @@
   .cm.mine b::after { content: " (you)"; font-weight: 400; color: var(--muted); }
   .cm time { color: var(--muted); font-size: 11px; margin-left: 6px; font-variant-numeric: tabular-nums; }
   .cm.system { color: var(--muted); font-size: 13px; text-align: center; }
+  .chathead { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+  .chathead h2 { margin: 0; }
+  .live { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 650; padding: 5px 11px; border-radius: 999px;
+    background: var(--line); color: var(--muted); max-width: 100%; }
+  .live .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+  .live.on { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+  .live .names { font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (prefers-reduced-motion: no-preference) {
+    .live.on .dot { animation: pulse 1.6s ease-in-out infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.7); } }
+  }
+  .cm .ear { display: none; font-size: 11px; font-weight: 600; color: var(--accent); margin-right: 6px;
+    background: color-mix(in srgb, var(--accent) 16%, transparent); padding: 1px 6px; border-radius: 999px; }
+  .cm.listening .ear { display: inline-block; }
   header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
   h1 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
   .pill { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: var(--line); color: var(--muted); }
@@ -140,7 +154,10 @@
   </div>
 
   <aside class="card" id="chatCard" hidden aria-label="Chat">
-    <h2>Chat</h2>
+    <div class="chathead">
+      <h2>Chat</h2>
+      <span class="live" id="chatLive" title=""><span class="dot" aria-hidden="true"></span><span id="chatLiveText">🎧 0 listening</span></span>
+    </div>
     <div class="chatlog" id="chatlog" aria-live="polite"><div class="cm system" id="chatEmpty">No messages yet — say hi.</div></div>
     <form class="row" id="chatForm">
       <input id="chatText" maxlength="280" placeholder="Say something…" autocomplete="off" enterkeyhint="send" aria-label="Message">
@@ -253,6 +270,14 @@
     $("listenBtn").disabled = !audio && !state.streamReady;
     const who = state.listening || [];
     $("listeners").textContent = who.length ? `🎧 ${who.length} listening: ${who.join(", ")}` : "No one's listening yet.";
+    // Live counter in the chat header, and 🎧 badges next to listeners' names in the chat.
+    $("chatLive").classList.toggle("on", who.length > 0);
+    $("chatLive").title = who.join(", ");
+    $("chatLiveText").innerHTML = who.length
+      ? `🎧 ${who.length} listening${who.length <= 3 ? ` <span class="names">· ${esc(who.join(", "))}</span>` : ""}`
+      : "🎧 0 listening";
+    listeningTags = new Set((state.listeningTags || []).filter((t) => /^[0-9a-f]{12}$/.test(t)));
+    if (typeof applyListening === "function") applyListening();
 
     const q = state.queue || [];
     $("queue").innerHTML = q.length ? q.map((t, i) => {
@@ -411,11 +436,19 @@
 
   // Live chat: poll for new messages every 1.5 s.
   let chatLast = 0, chatFirst = 0, chatBusy = false;
+  let listeningTags = new Set();
+  function applyListening() {
+    document.querySelectorAll("#chatlog .cm[data-tag]").forEach((el) => {
+      el.classList.toggle("listening", !!el.dataset.tag && listeningTags.has(el.dataset.tag));
+    });
+  }
   const chatSay = (text, kind) => { $("chatMsg").textContent = text; $("chatMsg").className = "msg " + (kind || ""); };
   function renderMsg(m) {
     const t = new Date(m.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     if (m.kind === "system") return `<div class="cm system">${esc(m.text)}</div>`;
-    return `<div class="cm ${m.kind}${m.mine ? " mine" : ""}"><b>${esc(m.name)}${m.kind === "host" ? " · host" : ""}</b>${esc(m.text)}<time>${t}</time></div>`;
+    const tag = /^[0-9a-f]{12}$/.test(m.tag || "") ? m.tag : "";
+    const live = tag && listeningTags.has(tag) ? " listening" : "";
+    return `<div class="cm ${m.kind}${m.mine ? " mine" : ""}${live}" data-tag="${tag}"><b>${esc(m.name)}${m.kind === "host" ? " · host" : ""}</b><span class="ear" title="Listening now">🎧 listening</span>${esc(m.text)}<time>${t}</time></div>`;
   }
   async function pollChat() {
     if (chatBusy || (SECRET && !API)) return;

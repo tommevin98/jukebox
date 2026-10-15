@@ -115,6 +115,7 @@
       <input type="range" id="vol" min="0" max="1" step="0.01" value="0.8" aria-label="Volume">
     </div>
     <p class="hint" id="listenHint">Hear the music right here — runs a few seconds behind.</p>
+    <p class="hint" id="listeners"></p>
   </section>
 
   <section class="card" id="requestCard">
@@ -152,7 +153,8 @@
 <script>
   const $ = (id) => document.getElementById(id);
   let state = null, fetchedAt = 0, failures = 0;
-  let audio = null, hls = null, vol = 0.8;
+  let audio = null, hls = null, vol = 0.8, beatTimer = 0;
+  const beat = () => post("api/listening", { name: $("name").value }).then(refresh).catch(() => {});
 
   // Two ways this page runs: served by MixMic through the tunnel (API is relative), or from GitHub Pages
   // with the secret after "#" — then we look up MixMic's current tunnel address in the repo's tunnel.json.
@@ -226,7 +228,8 @@
     const v = state.votes || { needed: 1, next: 0, toggle: 0 };
     const playing = n && n.state === "playing";
     const need = v.needed > 1;
-    $("reqby").textContent = state.requestedBy ? "Requested by " + state.requestedBy : "";
+    $("reqby").textContent = state.requestedBy ? "Requested by " + state.requestedBy
+      : state.playlist ? `From ${state.playlist.by}'s ${state.playlist.kind}: ${state.playlist.title}` : "";
     $("toggleBtn").textContent = (playing ? "⏸ Pause" : "▶ Resume") + (need && v.toggle ? ` ${v.toggle}/${v.needed}` : "");
     $("toggleBtn").disabled = !state.pause || !n || v.votedToggle;
     $("toggleBtn").classList.toggle("voted", !!v.votedToggle);
@@ -237,23 +240,25 @@
       : need ? `${v.needed} people need to vote to skip or pause.` : "";
     $("url").disabled = $("addBtn").disabled = !state.requests;
     $("url").placeholder = !state.requests ? "Requests are paused right now"
-      : state.search ? "Search a song, or paste a Spotify link" : "Paste a Spotify song link";
+      : state.search ? "Search a song, or paste a song or playlist link" : "Paste a Spotify song or playlist link";
     $("addBtn").textContent = state.search ? "Search" : "Add";
-    $("hint").textContent = state.search ? "Type a song or artist, then tap Add on a result."
-      : "In Spotify: ⋯ on a song → Share → Copy song link.";
+    $("hint").textContent = state.search ? "Type a song or artist and tap Add — or paste a playlist link to queue a whole playlist."
+      : "In Spotify: ⋯ → Share → Copy link. Songs and playlists both work.";
 
     $("listenCard").hidden = !state.broadcast;
     if (!state.broadcast && audio) stopListening("The broadcast has ended.");
     else if (!audio) $("listenHint").textContent = state.streamReady
-      ? `Hear the music right here — runs a few seconds behind.${state.listeners ? ` ${state.listeners} listening.` : ""}`
+      ? "Hear the music right here — runs a few seconds behind."
       : "The broadcast is starting…";
     $("listenBtn").disabled = !audio && !state.streamReady;
+    const who = state.listening || [];
+    $("listeners").textContent = who.length ? `🎧 ${who.length} listening: ${who.join(", ")}` : "No one's listening yet.";
 
     const q = state.queue || [];
     $("queue").innerHTML = q.length ? q.map((t, i) => {
       const th = safeUrl(t.thumb);
       return `<li class="q"><div class="thumb" style="${th ? `background-image:url('${th}')` : ""}"></div>
-        <div style="min-width:0"><div class="title" style="font-size:15px">${i + 1}. ${esc(t.title)}</div>
+        <div style="min-width:0"><div class="title" style="font-size:15px">${i + 1}. ${t.kind && t.kind !== "track" ? (t.kind === "album" ? "Album: " : "Playlist: ") : ""}${esc(t.title)}</div>
         <div class="by">${t.locked ? "playing next · added by " + esc(t.by) : t.mine ? "added by you" : "added by " + esc(t.by)}</div></div>
         ${t.mine ? `<button type="button" class="remove" data-uid="${esc(t.uid)}">Remove</button>` : "<span></span>"}</li>`;
     }).join("") : `<li class="empty" style="display:block">No requests yet — add one!</li>`;
@@ -275,7 +280,7 @@
     return j;
   }
 
-  const isLink = (v) => /open\.spotify\.com\/|spotify:track:/.test(v);
+  const isLink = (v) => /open\.spotify\.com\/|spotify:(track|playlist|album):/.test(v);
   let searchTimer = 0, searchSeq = 0, lastResults = [];
 
   async function runSearch(q) {
@@ -368,6 +373,10 @@
     sc.onload = ok; sc.onerror = fail; document.head.appendChild(sc);
   });
   function stopListening(msg) {
+    if (beatTimer) {
+      clearInterval(beatTimer); beatTimer = 0;
+      post("api/listening", { stop: true }).then(refresh).catch(() => {});
+    }
     if (hls) { hls.destroy(); hls = null; }
     if (audio) { audio.pause(); audio.removeAttribute("src"); audio.load(); audio = null; }
     $("listenBtn").textContent = "🎧 Listen";
@@ -392,6 +401,7 @@
       }
       await audio.play();
       $("listenHint").textContent = "Listening live 🎶";
+      beat(); beatTimer = setInterval(beat, 10000);
     } catch (err) { stopListening(err.message || "Couldn't start the stream."); }
   }
   $("listenBtn").addEventListener("click", () => audio ? stopListening("Stopped.") : startListening());

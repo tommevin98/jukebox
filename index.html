@@ -77,6 +77,16 @@
     @keyframes floatUp { 0% { transform: translateY(0) scale(.8); opacity: 0; } 15% { opacity: 1; } 100% { transform: translateY(-170px) scale(1.25); opacity: 0; } }
   }
   .talking { font-size: 13px; color: var(--accent); margin: 6px 0 0; }
+  .autofade { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; display: grid; gap: 8px; }
+  .af-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .af-row label { font-size: 13px; color: var(--muted); font-weight: 600; margin: 0; min-width: 76px; }
+  .af-row input[type=range] { flex: 1; min-width: 120px; accent-color: var(--accent); padding: 0; border: 0; background: none; }
+  .af-row select { font: inherit; font-size: 14px; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); flex: 1; min-width: 0; }
+  #afBtn.on { background: var(--accent); color: var(--accent-text); }
+  .af-val { font-size: 13px; color: var(--muted); min-width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
+  .vmeter { position: relative; height: 6px; border-radius: 6px; background: var(--line); flex: 1; min-width: 120px; overflow: hidden; }
+  .vmeter i { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--accent); border-radius: 6px; transition: width .05s linear; }
+  .vmeter b { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--text); left: 50%; }
   .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
   .controls button { width: 100%; }
   button.voted { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -146,7 +156,27 @@
     </div>
     <p class="hint" id="listenHint">Hear the music right here — runs a few seconds behind.</p>
     <p class="hint" id="listeners"></p>
-    <p class="talking" id="talkHint" hidden>🎙 The host is talking — music lowered</p>
+    <p class="talking" id="talkHint" hidden>🗣 Voice detected — music lowered</p>
+    <div class="autofade">
+      <div class="af-row">
+        <button type="button" class="secondary" id="afBtn">🗣 Fade when someone talks</button>
+        <select id="afSource" aria-label="What to listen for">
+          <option value="tab">Voices in my Gather tab or screen</option>
+          <option value="mic">My own microphone</option>
+        </select>
+      </div>
+      <div class="af-row">
+        <label for="afLevel">Fade to</label>
+        <input type="range" id="afLevel" min="0" max="0.8" step="0.05" value="0.3">
+        <span class="af-val" id="afLevelTxt">30%</span>
+      </div>
+      <div class="af-row">
+        <label for="afSens">Sensitivity</label>
+        <input type="range" id="afSens" min="0" max="1" step="0.05" value="0.5">
+        <div class="vmeter" aria-hidden="true"><i id="afMeter"></i><b id="afMark"></b></div>
+      </div>
+      <p class="hint" id="afHint">Your browser listens on this device only — nothing is sent anywhere.</p>
+    </div>
   </section>
 
   <section class="card" id="requestCard">
@@ -286,7 +316,6 @@
       : "The broadcast is starting…";
     $("listenBtn").disabled = !audio && !state.streamReady;
     renderReactions();
-    setTalk(state.talk);
     const who = state.listening || [];
     $("listeners").textContent = who.length ? `🎧 ${who.length} listening: ${who.join(", ")}` : "No one's listening yet.";
     // Live counter in the chat header, and 🎧 badges next to listeners' names in the chat.
@@ -489,19 +518,94 @@
     finally { b.disabled = false; }
   });
 
-  // Fade the stream while the host talks. Done here, in the browser, so the fade lines up with their voice
-  // in Gather instead of arriving 5–10 s late inside the stream.
-  let duck = 1, duckTarget = 1, talkUntil = 0, duckLevel = 0.3;
-  function setTalk(t) {
-    if (!t) return;
-    duckLevel = typeof t.level === "number" ? Math.min(1, Math.max(0, t.level)) : 0.3;
-    if (t.talking) talkUntil = Date.now() + 1500; // hold between polls and short pauses
+  // Fade when someone talks — runs entirely in this browser. It listens either to a shared Gather tab/screen
+  // (voices coming in) or to the listener's own mic, and only lowers this page's player volume.
+  let duck = 1;
+  const af = { stream: null, ctx: null, timer: 0, above: 0, holdUntil: 0, level: 0.3, sens: 0.5 };
+  try {
+    const saved = JSON.parse(localStorage.getItem("jbAutofade") || "{}");
+    if (saved.source) $("afSource").value = saved.source;
+    if (typeof saved.level === "number") af.level = saved.level;
+    if (typeof saved.sens === "number") af.sens = saved.sens;
+  } catch (e) {}
+  $("afLevel").value = af.level; $("afSens").value = af.sens;
+  const afSave = () => { try { localStorage.setItem("jbAutofade", JSON.stringify({ source: $("afSource").value, level: af.level, sens: af.sens })); } catch (e) {} };
+  const thresholdDb = () => -25 - 30 * af.sens; // strict −25 dB … sensitive −55 dB
+  const dbToPct = (db) => Math.max(0, Math.min(100, (db + 70) / 70 * 100));
+  function afUI() {
+    $("afLevelTxt").textContent = Math.round(af.level * 100) + "%";
+    $("afMark").style.left = dbToPct(thresholdDb()) + "%";
+    $("afBtn").classList.toggle("on", !!af.stream);
+    $("afBtn").textContent = af.stream ? "🗣 Auto-fade on — tap to stop" : "🗣 Fade when someone talks";
+    $("afSource").disabled = !!af.stream;
   }
+  $("afLevel").addEventListener("input", () => { af.level = parseFloat($("afLevel").value); afUI(); afSave(); });
+  $("afSens").addEventListener("input", () => { af.sens = parseFloat($("afSens").value); afUI(); afSave(); });
+  $("afSource").addEventListener("change", () => {
+    afSave();
+    $("afHint").textContent = $("afSource").value === "tab"
+      ? "Pick your Gather tab and turn on “Share tab audio”. With the Gather desktop app, pick Entire screen and turn on system audio if your browser offers it — otherwise use My own microphone."
+      : "Fades while you talk. Your browser will ask for the microphone.";
+  });
+  function stopAutofade(msg) {
+    clearInterval(af.timer); af.timer = 0;
+    if (af.stream) af.stream.getTracks().forEach((t) => t.stop());
+    if (af.ctx) af.ctx.close().catch(() => {});
+    af.stream = null; af.ctx = null; af.holdUntil = 0;
+    $("afMeter").style.width = "0";
+    if (msg) $("afHint").textContent = msg;
+    afUI();
+  }
+  async function startAutofade() {
+    const md = navigator.mediaDevices;
+    const useTab = $("afSource").value === "tab";
+    try {
+      if (!md || (useTab ? !md.getDisplayMedia : !md.getUserMedia)) throw new Error(useTab
+        ? "This browser can't share tab audio — try Chrome or Edge, or choose My own microphone."
+        : "This browser can't use the microphone here.");
+      let stream;
+      if (useTab) {
+        stream = await md.getDisplayMedia({ video: true, audio: true, systemAudio: "include", selfBrowserSurface: "exclude" });
+        stream.getVideoTracks().forEach((t) => t.stop()); // only the sound is needed
+        if (!stream.getAudioTracks().length) {
+          stream.getTracks().forEach((t) => t.stop());
+          throw new Error("No sound was shared. Try again and turn on “Share tab audio” (or system audio).");
+        }
+      } else {
+        stream = await md.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false } });
+      }
+      af.stream = stream;
+      af.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      await af.ctx.resume();
+      const source = af.ctx.createMediaStreamSource(stream);
+      const voiceBand = af.ctx.createBiquadFilter(); // focus on speech frequencies
+      voiceBand.type = "bandpass"; voiceBand.frequency.value = 1000; voiceBand.Q.value = 0.7;
+      const analyser = af.ctx.createAnalyser(); analyser.fftSize = 1024;
+      source.connect(voiceBand); voiceBand.connect(analyser); // never connected to the speakers
+      const buf = new Float32Array(analyser.fftSize);
+      stream.getAudioTracks()[0].addEventListener("ended", () => stopAutofade("Auto-fade stopped because sharing ended."));
+      af.timer = setInterval(() => {
+        analyser.getFloatTimeDomainData(buf);
+        let sum = 0; for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+        const db = 20 * Math.log10(Math.sqrt(sum / buf.length) + 1e-9);
+        af.above = db > thresholdDb() ? Math.min(af.above + 1, 10) : Math.max(0, af.above - 1);
+        if (af.above >= 3) af.holdUntil = Date.now() + 700; // ~150 ms of speech, then hold through short pauses
+        $("afMeter").style.width = dbToPct(db) + "%";
+      }, 50);
+      $("afHint").textContent = useTab ? "Listening to the shared sound for voices — only on this device."
+                                       : "Listening to your microphone for your voice — only on this device.";
+      afUI();
+    } catch (err) {
+      stopAutofade(err && err.name === "NotAllowedError" ? "Permission was declined — nothing is being listened to." : (err && err.message) || "Couldn't start auto-fade.");
+    }
+  }
+  $("afBtn").addEventListener("click", () => af.stream ? stopAutofade("Auto-fade is off.") : startAutofade());
+  afUI();
   setInterval(() => {
-    duckTarget = Date.now() < talkUntil ? duckLevel : 1;
-    duck += (duckTarget - duck) * (duckTarget < duck ? 0.25 : 0.07); // ~0.3 s down, ~1 s up
+    const target = Date.now() < af.holdUntil ? af.level : 1;
+    duck += (target - duck) * (target < duck ? 0.25 : 0.07); // ~0.3 s down, ~1 s up
     if (audio) audio.volume = Math.min(1, Math.max(0, vol * duck));
-    $("talkHint").hidden = !(audio && duckTarget < 1);
+    $("talkHint").hidden = !(audio && target < 1);
   }, 60);
 
   resolveAPI().then(refresh);
@@ -530,7 +634,6 @@
       const r = await fetch(API + "api/chat?after=" + chatLast, { cache: "no-store", headers: { "X-Client": client } });
       if (!r.ok) return;
       const j = await r.json();
-      setTalk(j.talk);
       $("chatCard").hidden = !j.enabled;
       const log = $("chatlog");
       // Host cleared the chat, or MixMic restarted: start over.

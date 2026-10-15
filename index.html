@@ -63,6 +63,20 @@
   button.secondary { background: var(--line); color: var(--text); }
   button:disabled { opacity: .45; cursor: default; }
   button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #nowCard { position: relative; overflow: hidden; }
+  .reacts { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+  .reacts button { flex: 1 1 0; min-width: 52px; padding: 7px 6px; font-size: 15px; font-weight: 600; background: var(--line); color: var(--text);
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid transparent; }
+  .reacts button .n { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 1ch; }
+  .reacts button.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  .reacts button.on .n { color: var(--accent); }
+  .floaters { position: absolute; inset: 0; pointer-events: none; }
+  .floaters span { position: absolute; bottom: 8px; font-size: 26px; opacity: 0; }
+  @media (prefers-reduced-motion: no-preference) {
+    .floaters span { animation: floatUp 1.8s ease-out forwards; }
+    @keyframes floatUp { 0% { transform: translateY(0) scale(.8); opacity: 0; } 15% { opacity: 1; } 100% { transform: translateY(-170px) scale(1.25); opacity: 0; } }
+  }
+  .talking { font-size: 13px; color: var(--accent); margin: 6px 0 0; }
   .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
   .controls button { width: 100%; }
   button.voted { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -121,6 +135,8 @@
       <button class="secondary" id="nextBtn">⏭ Next</button>
     </div>
     <p class="votehint" id="votehint"></p>
+    <div class="reacts" id="reacts" aria-label="React to this song"></div>
+    <div class="floaters" id="floaters" aria-hidden="true"></div>
   </section>
 
   <section class="card" id="listenCard" hidden>
@@ -130,6 +146,7 @@
     </div>
     <p class="hint" id="listenHint">Hear the music right here — runs a few seconds behind.</p>
     <p class="hint" id="listeners"></p>
+    <p class="talking" id="talkHint" hidden>🎙 The host is talking — music lowered</p>
   </section>
 
   <section class="card" id="requestCard">
@@ -268,6 +285,8 @@
       ? "Hear the music right here — runs a few seconds behind."
       : "The broadcast is starting…";
     $("listenBtn").disabled = !audio && !state.streamReady;
+    renderReactions();
+    setTalk(state.talk);
     const who = state.listening || [];
     $("listeners").textContent = who.length ? `🎧 ${who.length} listening: ${who.join(", ")}` : "No one's listening yet.";
     // Live counter in the chat header, and 🎧 badges next to listeners' names in the chat.
@@ -389,7 +408,7 @@
   $("vol").value = vol;
   $("vol").addEventListener("input", () => {
     vol = parseFloat($("vol").value);
-    if (audio) audio.volume = vol;
+    if (audio) audio.volume = Math.min(1, vol * duck);
     try { localStorage.setItem("jbVol", vol); } catch (e) {}
   });
   const loadHls = () => window.Hls ? Promise.resolve() : new Promise((ok, fail) => {
@@ -431,6 +450,60 @@
   }
   $("listenBtn").addEventListener("click", () => audio ? stopListening("Stopped.") : startListening());
 
+  // Song reactions
+  const EMOJI = ["🔥", "😂", "❤️", "💀", "👎"];
+  let lastReact = -1;
+  $("reacts").innerHTML = EMOJI.map((e) => `<button type="button" data-e="${e}" aria-label="React ${e}">${e}<span class="n">0</span></button>`).join("");
+  function renderReactions() {
+    const counts = state.reactions || {}, mine = new Set(state.myReactions || []);
+    const playing = !!state.now;
+    $("reacts").querySelectorAll("button").forEach((b) => {
+      const e = b.dataset.e;
+      b.querySelector(".n").textContent = counts[e] || 0;
+      b.classList.toggle("on", mine.has(e));
+      b.setAttribute("aria-pressed", mine.has(e) ? "true" : "false");
+      b.disabled = !playing;
+    });
+    const events = state.reactEvents || [];
+    if (lastReact < 0) { lastReact = events.length ? events[events.length - 1].id : 0; return; } // don't replay old ones
+    events.filter((ev) => ev.id > lastReact).slice(-8).forEach((ev, i) => setTimeout(() => floatEmoji(ev.e), i * 140));
+    if (events.length) lastReact = Math.max(lastReact, events[events.length - 1].id);
+  }
+  function floatEmoji(e) {
+    const el = document.createElement("span");
+    el.textContent = e;
+    el.style.left = (8 + Math.random() * 80) + "%";
+    $("floaters").appendChild(el);
+    setTimeout(() => el.remove(), 1900);
+  }
+  $("reacts").addEventListener("click", async (ev) => {
+    const b = ev.target.closest("button[data-e]");
+    if (!b || b.disabled) return;
+    b.disabled = true;
+    try {
+      const j = await post("api/react", { emoji: b.dataset.e, name: $("name").value });
+      if (j.added) floatEmoji(b.dataset.e);
+      lastReact = Math.max(lastReact, 0);
+      refresh();
+    } catch (err) { say(err.message, "err"); }
+    finally { b.disabled = false; }
+  });
+
+  // Fade the stream while the host talks. Done here, in the browser, so the fade lines up with their voice
+  // in Gather instead of arriving 5–10 s late inside the stream.
+  let duck = 1, duckTarget = 1, talkUntil = 0, duckLevel = 0.3;
+  function setTalk(t) {
+    if (!t) return;
+    duckLevel = typeof t.level === "number" ? Math.min(1, Math.max(0, t.level)) : 0.3;
+    if (t.talking) talkUntil = Date.now() + 1500; // hold between polls and short pauses
+  }
+  setInterval(() => {
+    duckTarget = Date.now() < talkUntil ? duckLevel : 1;
+    duck += (duckTarget - duck) * (duckTarget < duck ? 0.25 : 0.07); // ~0.3 s down, ~1 s up
+    if (audio) audio.volume = Math.min(1, Math.max(0, vol * duck));
+    $("talkHint").hidden = !(audio && duckTarget < 1);
+  }, 60);
+
   resolveAPI().then(refresh);
   setInterval(refresh, 2500);
 
@@ -457,6 +530,7 @@
       const r = await fetch(API + "api/chat?after=" + chatLast, { cache: "no-store", headers: { "X-Client": client } });
       if (!r.ok) return;
       const j = await r.json();
+      setTalk(j.talk);
       $("chatCard").hidden = !j.enabled;
       const log = $("chatlog");
       // Host cleared the chat, or MixMic restarted: start over.

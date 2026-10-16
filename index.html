@@ -77,6 +77,24 @@
     @keyframes floatUp { 0% { transform: translateY(0) scale(.8); opacity: 0; } 15% { opacity: 1; } 100% { transform: translateY(-170px) scale(1.25); opacity: 0; } }
   }
   .talking { font-size: 13px; color: var(--accent); margin: 6px 0 0; }
+  #djCard[hidden], #djLive[hidden], #djMicRow[hidden] { display: none; }
+  details.acc > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 14px;
+    padding: 2px 0; border-radius: 8px; user-select: none; }
+  details.acc > summary::-webkit-details-marker { display: none; }
+  details.acc > summary::after { content: "›"; font-size: 20px; line-height: 1; color: var(--muted); transition: transform .15s; margin-left: 4px; }
+  details.acc[open] > summary::after { transform: rotate(90deg); }
+  details.acc[open] > summary { margin-bottom: 12px; }
+  details.acc > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  details.acc .sum { margin-left: auto; font-weight: 500; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60%; }
+  details.acc .sum.on { color: var(--accent); }
+  .cardtitle { font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 650; }
+  #accFade { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; }
+  #accFade .autofade { border: 0; margin: 0; padding: 0; }
+  #accName { margin-bottom: 14px; }
+  .dj-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  #djBtn.live { background: #d93a3a; color: #fff; }
+  .djlive { margin: 0 0 10px; padding: 8px 12px; border-radius: 10px; font-weight: 650; font-size: 14px;
+    background: color-mix(in srgb, #d93a3a 16%, transparent); color: #d93a3a; }
   .autofade { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; display: grid; gap: 8px; }
   .af-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .af-row label { font-size: 13px; color: var(--muted); font-weight: 600; margin: 0; min-width: 76px; }
@@ -150,6 +168,7 @@
   </section>
 
   <section class="card" id="listenCard" hidden>
+    <p class="djlive" id="djLive" hidden></p>
     <div class="listen">
       <button id="listenBtn">🎧 Listen</button>
       <input type="range" id="vol" min="0" max="1" step="0.01" value="0.8" aria-label="Volume">
@@ -157,6 +176,8 @@
     <p class="hint" id="listenHint">Hear the music right here — runs a few seconds behind.</p>
     <p class="hint" id="listeners"></p>
     <p class="talking" id="talkHint" hidden>🗣 Voice detected — music lowered</p>
+    <details class="acc" id="accFade">
+    <summary>🗣 Auto-fade when someone talks <span class="sum" id="afSum">Off</span></summary>
     <div class="autofade">
       <div class="af-row">
         <button type="button" class="secondary" id="afBtn">🗣 Fade when someone talks</button>
@@ -177,13 +198,32 @@
       </div>
       <p class="hint" id="afHint">Your browser listens on this device only — nothing is sent anywhere.</p>
     </div>
+    </details>
+  </section>
+
+  <section class="card" id="djCard" hidden>
+    <details class="acc" id="accDj">
+    <summary><span class="cardtitle">🎙 Broadcast</span> <span class="sum" id="djSum">Share your audio</span></summary>
+    <div class="dj-row">
+      <button type="button" class="secondary" id="djBtn">🎙 Broadcast my audio</button>
+      <label style="display:inline-flex;align-items:center;gap:6px;margin:0;font-weight:500;color:var(--text)">
+        <input type="checkbox" id="djMic" checked style="width:auto"> Include my microphone
+      </label>
+    </div>
+    <div class="af-row" id="djMicRow">
+      <label for="djMicLevel">Mic level</label>
+      <input type="range" id="djMicLevel" min="0" max="2" step="0.05" value="1">
+      <span class="af-val" id="djMicTxt">100%</span>
+    </div>
+    <p class="hint" id="djHint">Share a tab (turn on “Share tab audio”), a window, or your whole screen with its sound — your mic is mixed in on top. Use headphones so the mic doesn't pick up the music twice. Everyone listening hears it once the host approves.</p>
+    </details>
   </section>
 
   <section class="card" id="requestCard">
-    <div class="field">
-      <label for="name">Your name <span style="font-weight:400">(optional)</span></label>
-      <input id="name" maxlength="24" placeholder="Shown next to your songs and messages" autocomplete="nickname">
-    </div>
+    <details class="acc" id="accName">
+      <summary>👤 Your name <span class="sum" id="nameSum">Not set</span></summary>
+      <input id="name" maxlength="24" placeholder="Shown next to your songs, messages and broadcasts" autocomplete="nickname" aria-label="Your name (optional)">
+    </details>
     <label for="url">Request a song</label>
     <form class="row" id="form">
       <input id="url" placeholder="Paste a Spotify song link" autocomplete="off" enterkeyhint="search">
@@ -195,8 +235,10 @@
   </section>
 
   <section class="card">
-    <h2>Up next</h2>
+    <details class="acc" id="accQueue" open>
+    <summary><span class="cardtitle">Up next</span> <span class="sum" id="queueSum">Empty</span></summary>
     <ol id="queue"><li class="empty" style="display:block">No requests yet — add one!</li></ol>
+    </details>
   </section>
   </div>
 
@@ -316,6 +358,7 @@
       : "The broadcast is starting…";
     $("listenBtn").disabled = !audio && !state.streamReady;
     renderReactions();
+    renderDJ();
     const who = state.listening || [];
     $("listeners").textContent = who.length ? `🎧 ${who.length} listening: ${who.join(", ")}` : "No one's listening yet.";
     // Live counter in the chat header, and 🎧 badges next to listeners' names in the chat.
@@ -328,6 +371,7 @@
     if (typeof applyListening === "function") applyListening();
 
     const q = state.queue || [];
+    $("queueSum").textContent = q.length ? `${q.length} song${q.length === 1 ? "" : "s"}` : "Empty";
     $("queue").innerHTML = q.length ? q.map((t, i) => {
       const th = safeUrl(t.thumb);
       return `<li class="q"><div class="thumb" style="${th ? `background-image:url('${th}')` : ""}"></div>
@@ -479,6 +523,14 @@
   }
   $("listenBtn").addEventListener("click", () => audio ? stopListening("Stopped.") : startListening());
 
+  // Collapsible sections: remember what each person opened.
+  const nameSum = () => { const n = $("name").value.trim(); $("nameSum").textContent = n || "Not set"; };
+  $("name").addEventListener("input", nameSum); nameSum();
+  ["accFade", "accDj", "accName", "accQueue"].forEach((id) => {
+    try { const v = localStorage.getItem("jbAcc:" + id); if (v !== null) $(id).open = v === "1"; } catch (e) {}
+    $(id).addEventListener("toggle", () => { try { localStorage.setItem("jbAcc:" + id, $(id).open ? "1" : "0"); } catch (e) {} });
+  });
+
   // Song reactions
   const EMOJI = ["🔥", "😂", "❤️", "💀", "👎"];
   let lastReact = -1;
@@ -538,6 +590,8 @@
     $("afBtn").classList.toggle("on", !!af.stream);
     $("afBtn").textContent = af.stream ? "🗣 Auto-fade on — tap to stop" : "🗣 Fade when someone talks";
     $("afSource").disabled = !!af.stream;
+    $("afSum").textContent = af.stream ? (Date.now() < af.holdUntil ? "Fading now" : "On") : "Off";
+    $("afSum").classList.toggle("on", !!af.stream);
   }
   $("afLevel").addEventListener("input", () => { af.level = parseFloat($("afLevel").value); afUI(); afSave(); });
   $("afSens").addEventListener("input", () => { af.sens = parseFloat($("afSens").value); afUI(); afSave(); });
@@ -607,6 +661,150 @@
     if (audio) audio.volume = Math.min(1, Math.max(0, vol * duck));
     $("talkHint").hidden = !(audio && target < 1);
   }, 60);
+
+  // Guest broadcast: share any tab/window/screen audio, ask the host, then stream 48 kHz PCM to MixMic.
+  const dj = { stream: null, mic: null, micGain: null, ctx: null, node: null, token: "", state: "none", poll: 0, queue: [], sending: false, buf: null, len: 0 };
+  let djMicLevel = 1;
+  try { djMicLevel = parseFloat(localStorage.getItem("jbDjMic") || "1"); $("djMic").checked = localStorage.getItem("jbDjMicOn") !== "0"; } catch (e) {}
+  $("djMicLevel").value = djMicLevel;
+  const djMicUI = () => { $("djMicTxt").textContent = Math.round(djMicLevel * 100) + "%"; $("djMicRow").hidden = !$("djMic").checked; };
+  $("djMicLevel").addEventListener("input", () => {
+    djMicLevel = parseFloat($("djMicLevel").value); djMicUI();
+    if (dj.micGain) dj.micGain.gain.value = $("djMic").checked ? djMicLevel : 0;
+    try { localStorage.setItem("jbDjMic", djMicLevel); } catch (e) {}
+  });
+  $("djMic").addEventListener("change", () => {
+    djMicUI();
+    if (dj.micGain) dj.micGain.gain.value = $("djMic").checked ? djMicLevel : 0; // live mute / unmute
+    try { localStorage.setItem("jbDjMicOn", $("djMic").checked ? "1" : "0"); } catch (e) {}
+  });
+  djMicUI();
+  const DJ_FRAMES = 9600; // 200 ms per upload
+  function renderDJ() {
+    const g = state.dj;
+    const live = g && g.live;
+    $("djLive").hidden = !live;
+    if (live) $("djLive").textContent = dj.state === "live" ? "🔴 You're live — everyone listening hears your audio" : `🎙 Live from ${g.name}`;
+    if (live && dj.state !== "live") { $("status").textContent = "🎙 " + g.name; $("status").className = "pill live"; }
+    $("djCard").hidden = !(state.djEnabled || dj.state !== "none");
+    djUI();
+  }
+  function djUI(msg) {
+    const b = $("djBtn");
+    b.classList.toggle("live", dj.state === "live");
+    b.textContent = { none: "🎙 Broadcast my audio", pending: "Cancel request", approved: "Starting…", live: "⏹ Stop broadcasting" }[dj.state];
+    b.disabled = dj.state === "approved";
+    $("djSum").textContent = { none: "Share your audio", pending: "Waiting for approval…", approved: "Starting…", live: "🔴 You're live" }[dj.state];
+    $("djSum").classList.toggle("on", dj.state !== "none");
+    if (dj.state !== "none") $("accDj").open = true; // keep it visible while waiting or on air
+    if (msg) $("djHint").textContent = msg;
+  }
+  async function djStart() {
+    const md = navigator.mediaDevices;
+    if (!md || !md.getDisplayMedia) { djUI("This browser can't share audio — try Chrome or Edge on a computer."); return; }
+    try {
+      const stream = await md.getDisplayMedia({ video: true, audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+                                                systemAudio: "include", selfBrowserSurface: "exclude" });
+      stream.getVideoTracks().forEach((t) => { t.enabled = false; }); // only the sound is used
+      const wantMic = $("djMic").checked;
+      if (!stream.getAudioTracks().length && !wantMic) {
+        stream.getTracks().forEach((t) => t.stop());
+        djUI("No sound was shared. Try again and turn on “Share tab audio” (or system audio), or tick Include my microphone.");
+        return;
+      }
+      dj.stream = stream;
+      (stream.getAudioTracks()[0] || stream.getVideoTracks()[0]).addEventListener("ended", () => djStop("You stopped sharing."));
+      if (wantMic) {
+        try {
+          dj.mic = await md.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+        } catch (e) {
+          if (!stream.getAudioTracks().length) { djStop("The microphone was blocked and no sound was shared."); return; }
+          djUI("The microphone was blocked — broadcasting the shared sound only.");
+        }
+      }
+      await post("api/dj/request", { name: $("name").value });
+      dj.state = "pending";
+      djUI(`Waiting for ${state && state.host ? state.host : "the host"} to approve…`);
+      dj.poll = setInterval(djPoll, 1500);
+    } catch (err) {
+      djStop(err && err.name === "NotAllowedError" ? "Sharing was cancelled." : (err && err.message) || "Couldn't start sharing.");
+    }
+  }
+  async function djPoll() {
+    try {
+      const r = await fetch(API + "api/dj/status", { cache: "no-store", headers: { "X-Client": client } });
+      const j = await r.json();
+      const host = state && state.host ? state.host : "The host";
+      if ((j.state === "approved" || j.state === "live") && !dj.ctx) await djBegin(j.token);
+      else if (j.state === "pending") djUI(`Waiting for ${host} to approve… (#${j.position} in line)`);
+      else if (j.state === "denied") djStop(`${host} said not right now.`, true);
+      else if (j.state === "none" && dj.state !== "pending") djStop("Your broadcast was ended.", true);
+      else if (j.state === "none") djStop("Your request expired.", true);
+    } catch (e) {}
+  }
+  async function djBegin(token) {
+    dj.token = token; dj.state = "approved"; djUI("Approved! Starting your broadcast…");
+    if (audio) stopListening("Paused while you broadcast, so you don't hear yourself twice.");
+    const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+    dj.ctx = ctx;
+    await ctx.resume();
+    const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination); // keeps the graph running, silently
+    const mix = ctx.createGain(); // shared app audio + mic are summed here
+    if (dj.stream.getAudioTracks().length) ctx.createMediaStreamSource(dj.stream).connect(mix);
+    if (dj.mic) {
+      dj.micGain = ctx.createGain();
+      dj.micGain.gain.value = $("djMic").checked ? djMicLevel : 0;
+      ctx.createMediaStreamSource(dj.mic).connect(dj.micGain);
+      dj.micGain.connect(mix);
+    }
+    dj.buf = new Int16Array(DJ_FRAMES * 2); dj.len = 0;
+    const take = (l, r) => {
+      for (let i = 0; i < l.length; i++) {
+        dj.buf[dj.len * 2] = Math.max(-32768, Math.min(32767, l[i] * 32767));
+        dj.buf[dj.len * 2 + 1] = Math.max(-32768, Math.min(32767, r[i] * 32767));
+        if (++dj.len === DJ_FRAMES) { dj.queue.push(dj.buf.buffer); dj.buf = new Int16Array(DJ_FRAMES * 2); dj.len = 0; djSend(); }
+      }
+    };
+    if (ctx.audioWorklet) {
+      const code = `class T extends AudioWorkletProcessor { process(i) { const c = i[0]; if (c && c.length) this.port.postMessage([c[0].slice(0), (c[1] || c[0]).slice(0)]); return true; } }
+                    registerProcessor("dj-tap", T);`;
+      await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([code], { type: "application/javascript" })));
+      dj.node = new AudioWorkletNode(ctx, "dj-tap");
+      dj.node.port.onmessage = (e) => take(e.data[0], e.data[1]);
+    } else {
+      dj.node = ctx.createScriptProcessor(4096, 2, 2);
+      dj.node.onaudioprocess = (e) => take(e.inputBuffer.getChannelData(0), e.inputBuffer.getChannelData(e.inputBuffer.numberOfChannels > 1 ? 1 : 0));
+    }
+    mix.connect(dj.node); dj.node.connect(sink);
+    dj.state = "live";
+    djUI("You're live 🎙 — everyone listening hears your audio. Close the share or tap Stop to finish.");
+  }
+  async function djSend() {
+    if (dj.sending) return;
+    dj.sending = true;
+    while (dj.queue.length && dj.state === "live") {
+      if (dj.queue.length > 15) dj.queue.splice(0, dj.queue.length - 5); // slow connection: skip ahead
+      const chunk = dj.queue.shift();
+      try {
+        const r = await fetch(API + "api/dj/audio?token=" + encodeURIComponent(dj.token),
+                              { method: "POST", headers: { "Content-Type": "application/octet-stream", "X-Client": client }, body: chunk });
+        if (r.status === 403) { djStop("Your broadcast was ended.", true); break; }
+      } catch (e) {}
+    }
+    dj.sending = false;
+  }
+  function djStop(msg, serverEnded) {
+    const was = dj.state;
+    clearInterval(dj.poll); dj.poll = 0;
+    if (dj.stream) dj.stream.getTracks().forEach((t) => t.stop());
+    if (dj.mic) dj.mic.getTracks().forEach((t) => t.stop());
+    if (dj.ctx) dj.ctx.close().catch(() => {});
+    Object.assign(dj, { stream: null, mic: null, micGain: null, ctx: null, node: null, token: "", state: "none", queue: [], buf: null, len: 0 });
+    if (!serverEnded && was !== "none") post("api/dj/cancel").catch(() => {});
+    djUI(msg);
+    if (state) renderDJ();
+  }
+  $("djBtn").addEventListener("click", () => dj.state === "none" ? djStart() : djStop(dj.state === "pending" ? "Request cancelled." : "Broadcast stopped."));
 
   resolveAPI().then(refresh);
   setInterval(refresh, 2500);

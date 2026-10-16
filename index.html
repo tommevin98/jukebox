@@ -17,35 +17,7 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
     font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; }
-  main { max-width: 1000px; margin: 0 auto; padding: 24px 16px 48px; display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 20px; }
-  main > .col { min-width: 0; }
-  @media (min-width: 880px) {
-    main { grid-template-columns: minmax(0, 520px) minmax(0, 1fr); }
-    main > header { grid-column: 1 / -1; }
-    #chatCard { position: sticky; top: 16px; align-self: start; }
-  }
-  .chatlog { height: 360px; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; padding-right: 4px; margin-bottom: 10px; overscroll-behavior: contain; }
-  @media (max-width: 879px) { .chatlog { height: 260px; } }
-  .cm { font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
-  .cm b { font-weight: 650; margin-right: 4px; }
-  .cm.host b { color: var(--accent); }
-  .cm.mine b::after { content: " (you)"; font-weight: 400; color: var(--muted); }
-  .cm time { color: var(--muted); font-size: 11px; margin-left: 6px; font-variant-numeric: tabular-nums; }
-  .cm.system { color: var(--muted); font-size: 13px; text-align: center; }
-  .chathead { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
-  .chathead h2 { margin: 0; }
-  .live { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 650; padding: 5px 11px; border-radius: 999px;
-    background: var(--line); color: var(--muted); max-width: 100%; }
-  .live .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
-  .live.on { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
-  .live .names { font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  @media (prefers-reduced-motion: no-preference) {
-    .live.on .dot { animation: pulse 1.6s ease-in-out infinite; }
-    @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.7); } }
-  }
-  .cm .ear { display: none; font-size: 11px; font-weight: 600; color: var(--accent); margin-right: 6px;
-    background: color-mix(in srgb, var(--accent) 16%, transparent); padding: 1px 6px; border-radius: 999px; }
-  .cm.listening .ear { display: inline-block; }
+  main { max-width: 520px; margin: 0 auto; padding: 24px 16px 48px; }
   header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
   h1 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
   .pill { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: var(--line); color: var(--muted); }
@@ -63,30 +35,6 @@
   button.secondary { background: var(--line); color: var(--text); }
   button:disabled { opacity: .45; cursor: default; }
   button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  #nowCard { position: relative; overflow: hidden; }
-  .reacts { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
-  .reacts button { flex: 1 1 0; min-width: 52px; padding: 7px 6px; font-size: 15px; font-weight: 600; background: var(--line); color: var(--text);
-    display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid transparent; }
-  .reacts button .n { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 1ch; }
-  .reacts button.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
-  .reacts button.on .n { color: var(--accent); }
-  .floaters { position: absolute; inset: 0; pointer-events: none; }
-  .floaters span { position: absolute; bottom: 8px; font-size: 26px; opacity: 0; }
-  @media (prefers-reduced-motion: no-preference) {
-    .floaters span { animation: floatUp 1.8s ease-out forwards; }
-    @keyframes floatUp { 0% { transform: translateY(0) scale(.8); opacity: 0; } 15% { opacity: 1; } 100% { transform: translateY(-170px) scale(1.25); opacity: 0; } }
-  }
-  .talking { font-size: 13px; color: var(--accent); margin: 6px 0 0; }
-  .autofade { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; display: grid; gap: 8px; }
-  .af-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .af-row label { font-size: 13px; color: var(--muted); font-weight: 600; margin: 0; min-width: 76px; }
-  .af-row input[type=range] { flex: 1; min-width: 120px; accent-color: var(--accent); padding: 0; border: 0; background: none; }
-  .af-row select { font: inherit; font-size: 14px; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); flex: 1; min-width: 0; }
-  #afBtn.on { background: var(--accent); color: var(--accent-text); }
-  .af-val { font-size: 13px; color: var(--muted); min-width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
-  .vmeter { position: relative; height: 6px; border-radius: 6px; background: var(--line); flex: 1; min-width: 120px; overflow: hidden; }
-  .vmeter i { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--accent); border-radius: 6px; transition: width .05s linear; }
-  .vmeter b { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--text); left: 50%; }
   .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
   .controls button { width: 100%; }
   button.voted { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -127,7 +75,6 @@
     <h1 id="heading">Office Jukebox</h1>
     <span id="status" class="pill">Connecting…</span>
   </header>
-  <div class="col">
 
   <section class="card" id="nowCard">
     <div class="now">
@@ -145,8 +92,6 @@
       <button class="secondary" id="nextBtn">⏭ Next</button>
     </div>
     <p class="votehint" id="votehint"></p>
-    <div class="reacts" id="reacts" aria-label="React to this song"></div>
-    <div class="floaters" id="floaters" aria-hidden="true"></div>
   </section>
 
   <section class="card" id="listenCard" hidden>
@@ -155,34 +100,12 @@
       <input type="range" id="vol" min="0" max="1" step="0.01" value="0.8" aria-label="Volume">
     </div>
     <p class="hint" id="listenHint">Hear the music right here — runs a few seconds behind.</p>
-    <p class="hint" id="listeners"></p>
-    <p class="talking" id="talkHint" hidden>🗣 Voice detected — music lowered</p>
-    <div class="autofade">
-      <div class="af-row">
-        <button type="button" class="secondary" id="afBtn">🗣 Fade when someone talks</button>
-        <select id="afSource" aria-label="What to listen for">
-          <option value="tab">Voices in my Gather tab or screen</option>
-          <option value="mic">My own microphone</option>
-        </select>
-      </div>
-      <div class="af-row">
-        <label for="afLevel">Fade to</label>
-        <input type="range" id="afLevel" min="0" max="0.8" step="0.05" value="0.3">
-        <span class="af-val" id="afLevelTxt">30%</span>
-      </div>
-      <div class="af-row">
-        <label for="afSens">Sensitivity</label>
-        <input type="range" id="afSens" min="0" max="1" step="0.05" value="0.5">
-        <div class="vmeter" aria-hidden="true"><i id="afMeter"></i><b id="afMark"></b></div>
-      </div>
-      <p class="hint" id="afHint">Your browser listens on this device only — nothing is sent anywhere.</p>
-    </div>
   </section>
 
   <section class="card" id="requestCard">
     <div class="field">
       <label for="name">Your name <span style="font-weight:400">(optional)</span></label>
-      <input id="name" maxlength="24" placeholder="Shown next to your songs and messages" autocomplete="nickname">
+      <input id="name" maxlength="24" placeholder="Shown next to songs you add" autocomplete="nickname">
     </div>
     <label for="url">Request a song</label>
     <form class="row" id="form">
@@ -198,27 +121,12 @@
     <h2>Up next</h2>
     <ol id="queue"><li class="empty" style="display:block">No requests yet — add one!</li></ol>
   </section>
-  </div>
-
-  <aside class="card" id="chatCard" hidden aria-label="Chat">
-    <div class="chathead">
-      <h2>Chat</h2>
-      <span class="live" id="chatLive" title=""><span class="dot" aria-hidden="true"></span><span id="chatLiveText">🎧 0 listening</span></span>
-    </div>
-    <div class="chatlog" id="chatlog" aria-live="polite"><div class="cm system" id="chatEmpty">No messages yet — say hi.</div></div>
-    <form class="row" id="chatForm">
-      <input id="chatText" maxlength="280" placeholder="Say something…" autocomplete="off" enterkeyhint="send" aria-label="Message">
-      <button type="submit" id="chatSend">Send</button>
-    </form>
-    <p class="msg" id="chatMsg" role="status"></p>
-  </aside>
 </main>
 
 <script>
   const $ = (id) => document.getElementById(id);
   let state = null, fetchedAt = 0, failures = 0;
-  let audio = null, hls = null, vol = 0.8, beatTimer = 0;
-  const beat = () => post("api/listening", { name: $("name").value }).then(refresh).catch(() => {});
+  let audio = null, hls = null, vol = 0.8;
 
   // Two ways this page runs: served by MixMic through the tunnel (API is relative), or from GitHub Pages
   // with the secret after "#" — then we look up MixMic's current tunnel address in the repo's tunnel.json.
@@ -292,47 +200,35 @@
     const v = state.votes || { needed: 1, next: 0, toggle: 0 };
     const playing = n && n.state === "playing";
     const need = v.needed > 1;
-    $("reqby").textContent = state.requestedBy ? "Requested by " + state.requestedBy
-      : state.playlist ? `From ${state.playlist.by}'s ${state.playlist.kind}: ${state.playlist.title}` : "";
+    $("reqby").textContent = state.requestedBy ? "Requested by " + state.requestedBy : "";
     $("toggleBtn").textContent = (playing ? "⏸ Pause" : "▶ Resume") + (need && v.toggle ? ` ${v.toggle}/${v.needed}` : "");
     $("toggleBtn").disabled = !state.pause || !n || v.votedToggle;
     $("toggleBtn").classList.toggle("voted", !!v.votedToggle);
     $("nextBtn").textContent = v.cooldown > 0 ? `⏳ ${fmt(v.cooldown)}` : "⏭ Next" + (need && v.next ? ` ${v.next}/${v.needed}` : "");
     $("nextBtn").disabled = !state.next || v.votedNext || v.cooldown > 0;
     $("nextBtn").classList.toggle("voted", !!v.votedNext);
-    $("votehint").textContent = v.cooldown > 0 ? `You've voted to skip ${(state.limits && state.limits.skipLimit) || 3} times — skipping is paused for you for a bit.`
+    $("votehint").textContent = v.cooldown > 0 ? "You've skipped 3 times — skipping is paused for you for a bit."
       : need ? `${v.needed} people need to vote to skip or pause.` : "";
     $("url").disabled = $("addBtn").disabled = !state.requests;
     $("url").placeholder = !state.requests ? "Requests are paused right now"
-      : state.search ? "Search a song, or paste a song or playlist link" : "Paste a Spotify song or playlist link";
+      : state.search ? "Search a song, or paste a Spotify link" : "Paste a Spotify song link";
     $("addBtn").textContent = state.search ? "Search" : "Add";
-    $("hint").textContent = state.search ? "Type a song or artist and tap Add — or paste a playlist link to queue a whole playlist."
-      : "In Spotify: ⋯ → Share → Copy link. Songs and playlists both work.";
+    $("hint").textContent = state.search ? "Type a song or artist, then tap Add on a result."
+      : "In Spotify: ⋯ on a song → Share → Copy song link.";
 
     $("listenCard").hidden = !state.broadcast;
     if (!state.broadcast && audio) stopListening("The broadcast has ended.");
     else if (!audio) $("listenHint").textContent = state.streamReady
-      ? "Hear the music right here — runs a few seconds behind."
+      ? `Hear the music right here — runs a few seconds behind.${state.listeners ? ` ${state.listeners} listening.` : ""}`
       : "The broadcast is starting…";
     $("listenBtn").disabled = !audio && !state.streamReady;
-    renderReactions();
-    const who = state.listening || [];
-    $("listeners").textContent = who.length ? `🎧 ${who.length} listening: ${who.join(", ")}` : "No one's listening yet.";
-    // Live counter in the chat header, and 🎧 badges next to listeners' names in the chat.
-    $("chatLive").classList.toggle("on", who.length > 0);
-    $("chatLive").title = who.join(", ");
-    $("chatLiveText").innerHTML = who.length
-      ? `🎧 ${who.length} listening${who.length <= 3 ? ` <span class="names">· ${esc(who.join(", "))}</span>` : ""}`
-      : "🎧 0 listening";
-    listeningTags = new Set((state.listeningTags || []).filter((t) => /^[0-9a-f]{12}$/.test(t)));
-    if (typeof applyListening === "function") applyListening();
 
     const q = state.queue || [];
     $("queue").innerHTML = q.length ? q.map((t, i) => {
       const th = safeUrl(t.thumb);
       return `<li class="q"><div class="thumb" style="${th ? `background-image:url('${th}')` : ""}"></div>
-        <div style="min-width:0"><div class="title" style="font-size:15px">${i + 1}. ${t.kind && t.kind !== "track" ? (t.kind === "album" ? "Album: " : "Playlist: ") : ""}${esc(t.title)}</div>
-        <div class="by">${t.locked ? "playing next · added by " + esc(t.by) : t.mine ? "added by you" : "added by " + esc(t.by)}</div></div>
+        <div style="min-width:0"><div class="title" style="font-size:15px">${i + 1}. ${esc(t.title)}</div>
+        <div class="by">${t.mine ? "added by you" : "added by " + esc(t.by)}</div></div>
         ${t.mine ? `<button type="button" class="remove" data-uid="${esc(t.uid)}">Remove</button>` : "<span></span>"}</li>`;
     }).join("") : `<li class="empty" style="display:block">No requests yet — add one!</li>`;
     tick();
@@ -353,7 +249,7 @@
     return j;
   }
 
-  const isLink = (v) => /open\.spotify\.com\/|spotify:(track|playlist|album):/.test(v);
+  const isLink = (v) => /open\.spotify\.com\/|spotify:track:/.test(v);
   let searchTimer = 0, searchSeq = 0, lastResults = [];
 
   async function runSearch(q) {
@@ -437,7 +333,7 @@
   $("vol").value = vol;
   $("vol").addEventListener("input", () => {
     vol = parseFloat($("vol").value);
-    if (audio) audio.volume = Math.min(1, vol * duck);
+    if (audio) audio.volume = vol;
     try { localStorage.setItem("jbVol", vol); } catch (e) {}
   });
   const loadHls = () => window.Hls ? Promise.resolve() : new Promise((ok, fail) => {
@@ -446,10 +342,6 @@
     sc.onload = ok; sc.onerror = fail; document.head.appendChild(sc);
   });
   function stopListening(msg) {
-    if (beatTimer) {
-      clearInterval(beatTimer); beatTimer = 0;
-      post("api/listening", { stop: true }).then(refresh).catch(() => {});
-    }
     if (hls) { hls.destroy(); hls = null; }
     if (audio) { audio.pause(); audio.removeAttribute("src"); audio.load(); audio = null; }
     $("listenBtn").textContent = "🎧 Listen";
@@ -474,201 +366,12 @@
       }
       await audio.play();
       $("listenHint").textContent = "Listening live 🎶";
-      beat(); beatTimer = setInterval(beat, 10000);
     } catch (err) { stopListening(err.message || "Couldn't start the stream."); }
   }
   $("listenBtn").addEventListener("click", () => audio ? stopListening("Stopped.") : startListening());
 
-  // Song reactions
-  const EMOJI = ["🔥", "😂", "❤️", "💀", "👎"];
-  let lastReact = -1;
-  $("reacts").innerHTML = EMOJI.map((e) => `<button type="button" data-e="${e}" aria-label="React ${e}">${e}<span class="n">0</span></button>`).join("");
-  function renderReactions() {
-    const counts = state.reactions || {}, mine = new Set(state.myReactions || []);
-    const playing = !!state.now;
-    $("reacts").querySelectorAll("button").forEach((b) => {
-      const e = b.dataset.e;
-      b.querySelector(".n").textContent = counts[e] || 0;
-      b.classList.toggle("on", mine.has(e));
-      b.setAttribute("aria-pressed", mine.has(e) ? "true" : "false");
-      b.disabled = !playing;
-    });
-    const events = state.reactEvents || [];
-    if (lastReact < 0) { lastReact = events.length ? events[events.length - 1].id : 0; return; } // don't replay old ones
-    events.filter((ev) => ev.id > lastReact).slice(-8).forEach((ev, i) => setTimeout(() => floatEmoji(ev.e), i * 140));
-    if (events.length) lastReact = Math.max(lastReact, events[events.length - 1].id);
-  }
-  function floatEmoji(e) {
-    const el = document.createElement("span");
-    el.textContent = e;
-    el.style.left = (8 + Math.random() * 80) + "%";
-    $("floaters").appendChild(el);
-    setTimeout(() => el.remove(), 1900);
-  }
-  $("reacts").addEventListener("click", async (ev) => {
-    const b = ev.target.closest("button[data-e]");
-    if (!b || b.disabled) return;
-    b.disabled = true;
-    try {
-      const j = await post("api/react", { emoji: b.dataset.e, name: $("name").value });
-      if (j.added) floatEmoji(b.dataset.e);
-      lastReact = Math.max(lastReact, 0);
-      refresh();
-    } catch (err) { say(err.message, "err"); }
-    finally { b.disabled = false; }
-  });
-
-  // Fade when someone talks — runs entirely in this browser. It listens either to a shared Gather tab/screen
-  // (voices coming in) or to the listener's own mic, and only lowers this page's player volume.
-  let duck = 1;
-  const af = { stream: null, ctx: null, timer: 0, above: 0, holdUntil: 0, level: 0.3, sens: 0.5 };
-  try {
-    const saved = JSON.parse(localStorage.getItem("jbAutofade") || "{}");
-    if (saved.source) $("afSource").value = saved.source;
-    if (typeof saved.level === "number") af.level = saved.level;
-    if (typeof saved.sens === "number") af.sens = saved.sens;
-  } catch (e) {}
-  $("afLevel").value = af.level; $("afSens").value = af.sens;
-  const afSave = () => { try { localStorage.setItem("jbAutofade", JSON.stringify({ source: $("afSource").value, level: af.level, sens: af.sens })); } catch (e) {} };
-  const thresholdDb = () => -25 - 30 * af.sens; // strict −25 dB … sensitive −55 dB
-  const dbToPct = (db) => Math.max(0, Math.min(100, (db + 70) / 70 * 100));
-  function afUI() {
-    $("afLevelTxt").textContent = Math.round(af.level * 100) + "%";
-    $("afMark").style.left = dbToPct(thresholdDb()) + "%";
-    $("afBtn").classList.toggle("on", !!af.stream);
-    $("afBtn").textContent = af.stream ? "🗣 Auto-fade on — tap to stop" : "🗣 Fade when someone talks";
-    $("afSource").disabled = !!af.stream;
-  }
-  $("afLevel").addEventListener("input", () => { af.level = parseFloat($("afLevel").value); afUI(); afSave(); });
-  $("afSens").addEventListener("input", () => { af.sens = parseFloat($("afSens").value); afUI(); afSave(); });
-  $("afSource").addEventListener("change", () => {
-    afSave();
-    $("afHint").textContent = $("afSource").value === "tab"
-      ? "Pick your Gather tab and turn on “Share tab audio”. With the Gather desktop app, pick Entire screen and turn on system audio if your browser offers it — otherwise use My own microphone."
-      : "Fades while you talk. Your browser will ask for the microphone.";
-  });
-  function stopAutofade(msg) {
-    clearInterval(af.timer); af.timer = 0;
-    if (af.stream) af.stream.getTracks().forEach((t) => t.stop());
-    if (af.ctx) af.ctx.close().catch(() => {});
-    af.stream = null; af.ctx = null; af.holdUntil = 0;
-    $("afMeter").style.width = "0";
-    if (msg) $("afHint").textContent = msg;
-    afUI();
-  }
-  async function startAutofade() {
-    const md = navigator.mediaDevices;
-    const useTab = $("afSource").value === "tab";
-    try {
-      if (!md || (useTab ? !md.getDisplayMedia : !md.getUserMedia)) throw new Error(useTab
-        ? "This browser can't share tab audio — try Chrome or Edge, or choose My own microphone."
-        : "This browser can't use the microphone here.");
-      let stream;
-      if (useTab) {
-        stream = await md.getDisplayMedia({ video: true, audio: true, systemAudio: "include", selfBrowserSurface: "exclude" });
-        stream.getVideoTracks().forEach((t) => t.stop()); // only the sound is needed
-        if (!stream.getAudioTracks().length) {
-          stream.getTracks().forEach((t) => t.stop());
-          throw new Error("No sound was shared. Try again and turn on “Share tab audio” (or system audio).");
-        }
-      } else {
-        stream = await md.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false } });
-      }
-      af.stream = stream;
-      af.ctx = new (window.AudioContext || window.webkitAudioContext)();
-      await af.ctx.resume();
-      const source = af.ctx.createMediaStreamSource(stream);
-      const voiceBand = af.ctx.createBiquadFilter(); // focus on speech frequencies
-      voiceBand.type = "bandpass"; voiceBand.frequency.value = 1000; voiceBand.Q.value = 0.7;
-      const analyser = af.ctx.createAnalyser(); analyser.fftSize = 1024;
-      source.connect(voiceBand); voiceBand.connect(analyser); // never connected to the speakers
-      const buf = new Float32Array(analyser.fftSize);
-      stream.getAudioTracks()[0].addEventListener("ended", () => stopAutofade("Auto-fade stopped because sharing ended."));
-      af.timer = setInterval(() => {
-        analyser.getFloatTimeDomainData(buf);
-        let sum = 0; for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-        const db = 20 * Math.log10(Math.sqrt(sum / buf.length) + 1e-9);
-        af.above = db > thresholdDb() ? Math.min(af.above + 1, 10) : Math.max(0, af.above - 1);
-        if (af.above >= 3) af.holdUntil = Date.now() + 700; // ~150 ms of speech, then hold through short pauses
-        $("afMeter").style.width = dbToPct(db) + "%";
-      }, 50);
-      $("afHint").textContent = useTab ? "Listening to the shared sound for voices — only on this device."
-                                       : "Listening to your microphone for your voice — only on this device.";
-      afUI();
-    } catch (err) {
-      stopAutofade(err && err.name === "NotAllowedError" ? "Permission was declined — nothing is being listened to." : (err && err.message) || "Couldn't start auto-fade.");
-    }
-  }
-  $("afBtn").addEventListener("click", () => af.stream ? stopAutofade("Auto-fade is off.") : startAutofade());
-  afUI();
-  setInterval(() => {
-    const target = Date.now() < af.holdUntil ? af.level : 1;
-    duck += (target - duck) * (target < duck ? 0.25 : 0.07); // ~0.3 s down, ~1 s up
-    if (audio) audio.volume = Math.min(1, Math.max(0, vol * duck));
-    $("talkHint").hidden = !(audio && target < 1);
-  }, 60);
-
   resolveAPI().then(refresh);
   setInterval(refresh, 2500);
-
-  // Live chat: poll for new messages every 1.5 s.
-  let chatLast = 0, chatFirst = 0, chatBusy = false;
-  let listeningTags = new Set();
-  function applyListening() {
-    document.querySelectorAll("#chatlog .cm[data-tag]").forEach((el) => {
-      el.classList.toggle("listening", !!el.dataset.tag && listeningTags.has(el.dataset.tag));
-    });
-  }
-  const chatSay = (text, kind) => { $("chatMsg").textContent = text; $("chatMsg").className = "msg " + (kind || ""); };
-  function renderMsg(m) {
-    const t = new Date(m.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    if (m.kind === "system") return `<div class="cm system">${esc(m.text)}</div>`;
-    const tag = /^[0-9a-f]{12}$/.test(m.tag || "") ? m.tag : "";
-    const live = tag && listeningTags.has(tag) ? " listening" : "";
-    return `<div class="cm ${m.kind}${m.mine ? " mine" : ""}${live}" data-tag="${tag}"><b>${esc(m.name)}${m.kind === "host" ? " · host" : ""}</b><span class="ear" title="Listening now">🎧 listening</span>${esc(m.text)}<time>${t}</time></div>`;
-  }
-  async function pollChat() {
-    if (chatBusy || (SECRET && !API)) return;
-    chatBusy = true;
-    try {
-      const r = await fetch(API + "api/chat?after=" + chatLast, { cache: "no-store", headers: { "X-Client": client } });
-      if (!r.ok) return;
-      const j = await r.json();
-      $("chatCard").hidden = !j.enabled;
-      const log = $("chatlog");
-      // Host cleared the chat, or MixMic restarted: start over.
-      if (j.last < chatLast || (chatFirst && j.first > chatFirst)) {
-        log.innerHTML = '<div class="cm system" id="chatEmpty">No messages yet — say hi.</div>';
-        chatLast = 0; chatFirst = 0;
-        chatBusy = false; return pollChat();
-      }
-      const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
-      for (const m of j.messages) {
-        if (m.id <= chatLast) continue;
-        const empty = $("chatEmpty"); if (empty) empty.remove();
-        log.insertAdjacentHTML("beforeend", renderMsg(m));
-        chatLast = m.id;
-        if (!chatFirst) chatFirst = m.id;
-      }
-      while (log.children.length > 200) log.firstElementChild.remove();
-      if (atBottom) log.scrollTop = log.scrollHeight;
-    } catch (e) {} finally { chatBusy = false; }
-  }
-  $("chatText").addEventListener("input", () => chatSay("", ""));
-  $("chatForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const text = $("chatText").value.trim();
-    if (!text) { chatSay("Type a message first.", "err"); return; }
-    $("chatSend").disabled = true;
-    try {
-      await post("api/chat", { text, name: $("name").value });
-      $("chatText").value = "";
-      await pollChat();
-      $("chatlog").scrollTop = $("chatlog").scrollHeight;
-    } catch (err) { chatSay(err.message, "err"); }
-    finally { $("chatSend").disabled = false; }
-  });
-  setInterval(pollChat, 1500);
   setInterval(tick, 500);
 </script>
 </body>

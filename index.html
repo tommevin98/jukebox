@@ -78,6 +78,20 @@
   }
   .talking { font-size: 13px; color: var(--accent); margin: 6px 0 0; }
   #djCard[hidden], #djLive[hidden], #djMicRow[hidden] { display: none; }
+  #heading { cursor: default; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
+  .hdr-right { display: flex; align-items: center; gap: 8px; }
+  #bellBtn { padding: 4px 9px; font-size: 14px; background: var(--line); color: var(--muted); border-radius: 999px; }
+  #bellBtn.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  #bellBtn[hidden], #toast[hidden], #decoy[hidden] { display: none; }
+  #toast { position: fixed; left: 50%; top: calc(14px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 20;
+    max-width: min(92vw, 520px); padding: 12px 18px; border-radius: 14px; background: var(--text); color: var(--bg);
+    font-weight: 650; font-size: 15px; box-shadow: 0 10px 30px rgba(0,0,0,.25); text-align: center; }
+  @media (prefers-reduced-motion: no-preference) { #toast { animation: drop .35s ease-out; } @keyframes drop { from { transform: translate(-50%, -16px); opacity: 0; } } }
+  #decoy { position: fixed; inset: 0; z-index: 30; background: var(--bg); display: grid; place-items: center; padding: 24px; text-align: center; }
+  #decoy .box { max-width: 380px; display: grid; gap: 10px; justify-items: center; }
+  #decoy .art { width: 96px; height: 96px; border-radius: 22px; background: var(--card); border: 1px solid var(--line); display: grid; place-items: center; font-size: 40px; opacity: .6; }
+  #decoy h1 { font-size: 22px; margin: 8px 0 0; }
+  #decoy p { color: var(--muted); margin: 0; }
   details.acc > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 14px;
     padding: 2px 0; border-radius: 8px; user-select: none; }
   details.acc > summary::-webkit-details-marker { display: none; }
@@ -140,10 +154,22 @@
 </style>
 </head>
 <body>
+<div id="toast" role="status" aria-live="assertive" hidden></div>
+<div id="decoy" hidden>
+  <div class="box">
+    <div class="art" aria-hidden="true">♪</div>
+    <h1 id="decoyTitle">Office Jukebox</h1>
+    <p>This jukebox is offline right now.</p>
+    <p>Check back later.</p>
+  </div>
+</div>
 <main>
   <header>
     <h1 id="heading">Office Jukebox</h1>
-    <span id="status" class="pill">Connecting…</span>
+    <div class="hdr-right">
+      <button type="button" id="bellBtn" hidden aria-label="Notify me when someone goes live" title="Notify me when someone goes live">🔔</button>
+      <span id="status" class="pill">Connecting…</span>
+    </div>
   </header>
   <div class="col">
 
@@ -523,6 +549,102 @@
   }
   $("listenBtn").addEventListener("click", () => audio ? stopListening("Stopped.") : startListening());
 
+  // Secret dev mode: tap the title 5 times quickly, then press and hold it for a second.
+  let devUnlocked = false, decoyOn = false;
+  try { devUnlocked = localStorage.getItem("jbDev") === "1"; decoyOn = sessionStorage.getItem("jbDecoy") === "1"; } catch (e) {}
+  const toast = (text, ms = 6000) => {
+    const t = $("toast"); t.textContent = text; t.hidden = false;
+    clearTimeout(toast.timer); toast.timer = setTimeout(() => { t.hidden = true; }, ms);
+  };
+  function showDecoy() {
+    decoyOn = true; try { sessionStorage.setItem("jbDecoy", "1"); } catch (e) {}
+    $("decoyTitle").textContent = $("heading").textContent;
+    if (audio) stopListening();
+    $("decoy").hidden = false;
+  }
+  function hideDecoy() {
+    decoyOn = false; try { sessionStorage.removeItem("jbDecoy"); } catch (e) {}
+    $("decoy").hidden = true;
+  }
+  if (decoyOn) $("decoy").hidden = false;
+  (() => {
+    let taps = [], armedUntil = 0, holdTimer = 0;
+    const h = $("heading");
+    const onSecret = () => {
+      if (navigator.vibrate) navigator.vibrate(40);
+      if (devUnlocked) {
+        devUnlocked = false; try { localStorage.removeItem("jbDev"); } catch (e) {}
+        toast("Broadcast controls hidden"); if (state) renderDJ(); return;
+      }
+      const someoneLive = state && state.dj && state.dj.live;
+      if (someoneLive && !state.djTrusted && dj.state === "none") { showDecoy(); return; }
+      devUnlocked = true; try { localStorage.setItem("jbDev", "1"); } catch (e) {}
+      toast("🛠 Broadcast controls unlocked");
+      if (state) renderDJ();
+      $("accDj").open = true;
+      setTimeout(() => $("djCard").scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+    };
+    h.addEventListener("click", () => {
+      const now = Date.now();
+      taps = taps.filter((t) => now - t < 2500); taps.push(now);
+      if (taps.length >= 5) { taps = []; armedUntil = now + 4000; }
+    });
+    const startHold = () => {
+      if (Date.now() > armedUntil) return;
+      clearTimeout(holdTimer);
+      holdTimer = setTimeout(() => { armedUntil = 0; onSecret(); }, 1000);
+    };
+    const cancelHold = () => clearTimeout(holdTimer);
+    h.addEventListener("pointerdown", startHold);
+    ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => h.addEventListener(ev, cancelHold));
+    h.addEventListener("contextmenu", (e) => { if (Date.now() <= armedUntil || holdTimer) e.preventDefault(); });
+  })();
+
+  // Pings from the host (and "X is live" announcements): banner, soft chime, optional notification.
+  let lastPing = -1, chimeCtx = null, notifyOn = false;
+  try { notifyOn = localStorage.getItem("jbNotify") === "1"; } catch (e) {}
+  document.addEventListener("pointerdown", () => {
+    if (!chimeCtx) { try { chimeCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    else if (chimeCtx.state === "suspended") chimeCtx.resume().catch(() => {});
+  }, { passive: true });
+  function chime() {
+    if (!chimeCtx) return;
+    const t = chimeCtx.currentTime;
+    [880, 1320].forEach((hz, i) => {
+      const o = chimeCtx.createOscillator(), g = chimeCtx.createGain();
+      o.frequency.value = hz; o.type = "sine";
+      g.gain.setValueAtTime(0, t + i * 0.12); g.gain.linearRampToValueAtTime(0.12, t + i * 0.12 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.12 + 0.5);
+      o.connect(g); g.connect(chimeCtx.destination); o.start(t + i * 0.12); o.stop(t + i * 0.12 + 0.55);
+    });
+  }
+  function handlePings() {
+    const list = state.pings || [];
+    const top = list.length ? list[list.length - 1].id : 0;
+    if (lastPing < 0) { lastPing = top; return; } // don't replay old ones on load
+    list.filter((p) => p.id > lastPing).forEach((p) => {
+      if (decoyOn) return;
+      toast(p.text); chime();
+      if (notifyOn && document.hidden && "Notification" in window && Notification.permission === "granted") {
+        try { new Notification(state.host ? state.host + "'s Jukebox" : "Jukebox", { body: p.text }); } catch (e) {}
+      }
+    });
+    lastPing = Math.max(lastPing, top);
+  }
+  if ("Notification" in window) {
+    const bell = $("bellBtn");
+    const bellUI = () => { bell.classList.toggle("on", notifyOn && Notification.permission === "granted"); };
+    bell.hidden = false; bellUI();
+    bell.addEventListener("click", async () => {
+      if (Notification.permission === "denied") { toast("Notifications are blocked for this site in your browser settings."); return; }
+      if (Notification.permission !== "granted") { try { await Notification.requestPermission(); } catch (e) {} }
+      notifyOn = Notification.permission === "granted" ? !bell.classList.contains("on") : false;
+      try { localStorage.setItem("jbNotify", notifyOn ? "1" : "0"); } catch (e) {}
+      bellUI();
+      toast(notifyOn ? "🔔 You'll get a notification when someone goes live" : "🔕 Notifications off", 3500);
+    });
+  }
+
   // Collapsible sections: remember what each person opened.
   const nameSum = () => { const n = $("name").value.trim(); $("nameSum").textContent = n || "Not set"; };
   $("name").addEventListener("input", nameSum); nameSum();
@@ -686,7 +808,9 @@
     $("djLive").hidden = !live;
     if (live) $("djLive").textContent = dj.state === "live" ? "🔴 You're live — everyone listening hears your audio" : `🎙 Live from ${g.name}`;
     if (live && dj.state !== "live") { $("status").textContent = "🎙 " + g.name; $("status").className = "pill live"; }
-    $("djCard").hidden = !(state.djEnabled || dj.state !== "none");
+    $("djCard").hidden = !((devUnlocked && state.djEnabled) || dj.state !== "none");
+    if (decoyOn && !live) hideDecoy(); // the broadcast ended: back to the normal page
+    handlePings();
     djUI();
   }
   function djUI(msg) {
@@ -722,7 +846,8 @@
           djUI("The microphone was blocked — broadcasting the shared sound only.");
         }
       }
-      await post("api/dj/request", { name: $("name").value });
+      try { await post("api/dj/request", { name: $("name").value }); }
+      catch (e) { if (/offline/i.test(e.message)) { stream.getTracks().forEach((t) => t.stop()); dj.stream = null; showDecoy(); return; } throw e; }
       dj.state = "pending";
       djUI(`Waiting for ${state && state.host ? state.host : "the host"} to approve…`);
       dj.poll = setInterval(djPoll, 1500);

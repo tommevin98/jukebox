@@ -78,6 +78,16 @@
   }
   .talking { font-size: 13px; color: var(--accent); margin: 6px 0 0; }
   #djCard[hidden], #djLive[hidden], #djMicRow[hidden] { display: none; }
+  .room { display: grid; gap: 6px; margin-bottom: 14px; }
+  .room-row { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); }
+  .room-row.on { border-color: var(--accent); }
+  .room-row .who { min-width: 0; flex: 1; }
+  .room-row .who b { display: block; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .room-row .who span { font-size: 12px; color: var(--muted); }
+  .room-row .dot { width: 9px; height: 9px; border-radius: 50%; background: #d93a3a; flex: none; }
+  .room-row .dot.main { background: var(--accent); }
+  .room-row button { padding: 7px 12px; font-size: 13px; }
+  .room-empty { font-size: 13px; color: var(--muted); }
   #heading { cursor: default; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
   .hdr-right { display: flex; align-items: center; gap: 8px; }
   #bellBtn { padding: 4px 9px; font-size: 14px; background: var(--line); color: var(--muted); border-radius: 999px; }
@@ -155,14 +165,6 @@
 </head>
 <body>
 <div id="toast" role="status" aria-live="assertive" hidden></div>
-<div id="decoy" hidden>
-  <div class="box">
-    <div class="art" aria-hidden="true">♪</div>
-    <h1 id="decoyTitle">Office Jukebox</h1>
-    <p>This jukebox is offline right now.</p>
-    <p>Check back later.</p>
-  </div>
-</div>
 <main>
   <header>
     <h1 id="heading">Office Jukebox</h1>
@@ -201,6 +203,7 @@
     </div>
     <p class="hint" id="listenHint">Hear the music right here — runs a few seconds behind.</p>
     <p class="hint" id="listeners"></p>
+    <p class="talking" id="chanHint" hidden></p>
     <p class="talking" id="talkHint" hidden>🗣 Voice detected — music lowered</p>
     <details class="acc" id="accFade">
     <summary>🗣 Auto-fade when someone talks <span class="sum" id="afSum">Off</span></summary>
@@ -229,7 +232,8 @@
 
   <section class="card" id="djCard" hidden>
     <details class="acc" id="accDj">
-    <summary><span class="cardtitle">🎙 Broadcast</span> <span class="sum" id="djSum">Share your audio</span></summary>
+    <summary><span class="cardtitle">🎙 Broadcast room</span> <span class="sum" id="djSum">Share your audio</span></summary>
+    <div class="room" id="roomList" aria-label="Live broadcasts"></div>
     <div class="dj-row">
       <button type="button" class="secondary" id="djBtn">🎙 Broadcast my audio</button>
       <label style="display:inline-flex;align-items:center;gap:6px;margin:0;font-weight:500;color:var(--text)">
@@ -241,7 +245,7 @@
       <input type="range" id="djMicLevel" min="0" max="2" step="0.05" value="1">
       <span class="af-val" id="djMicTxt">100%</span>
     </div>
-    <p class="hint" id="djHint">Share a tab (turn on “Share tab audio”), a window, or your whole screen with its sound — your mic is mixed in on top. Use headphones so the mic doesn't pick up the music twice. Everyone listening hears it once the host approves.</p>
+    <p class="hint" id="djHint">Go live with a tab (turn on “Share tab audio”), a window, or your whole screen with its sound — your mic is mixed in on top. Use headphones so the mic doesn't pick up the music twice. Anyone in the room can tune in.</p>
     </details>
   </section>
 
@@ -286,7 +290,8 @@
   const $ = (id) => document.getElementById(id);
   let state = null, fetchedAt = 0, failures = 0;
   let audio = null, hls = null, vol = 0.8, beatTimer = 0;
-  const beat = () => post("api/listening", { name: $("name").value }).then(refresh).catch(() => {});
+  let channel = "main"; // "main" = Tom's Jukebox (Spotify), otherwise a broadcast-room channel id
+  const beat = () => post("api/listening", { name: $("name").value, channel }).then(refresh).catch(() => {});
 
   // Two ways this page runs: served by MixMic through the tunnel (API is relative), or from GitHub Pages
   // with the secret after "#" — then we look up MixMic's current tunnel address in the repo's tunnel.json.
@@ -382,7 +387,7 @@
     else if (!audio) $("listenHint").textContent = state.streamReady
       ? "Hear the music right here — runs a few seconds behind."
       : "The broadcast is starting…";
-    $("listenBtn").disabled = !audio && !state.streamReady;
+    $("listenBtn").disabled = !audio && channel === "main" && !state.streamReady;
     renderReactions();
     renderDJ();
     const who = state.listening || [];
@@ -526,7 +531,7 @@
     if (msg) $("listenHint").textContent = msg;
   }
   async function startListening() {
-    const src = API + "live.m3u8";
+    const src = API + (channel === "main" ? "live.m3u8" : `ch/${channel}/live.m3u8`);
     audio = new Audio();
     audio.volume = vol;
     $("listenBtn").textContent = "⏹ Stop";
@@ -556,17 +561,7 @@
     const t = $("toast"); t.textContent = text; t.hidden = false;
     clearTimeout(toast.timer); toast.timer = setTimeout(() => { t.hidden = true; }, ms);
   };
-  function showDecoy() {
-    decoyOn = true; try { sessionStorage.setItem("jbDecoy", "1"); } catch (e) {}
-    $("decoyTitle").textContent = $("heading").textContent;
-    if (audio) stopListening();
-    $("decoy").hidden = false;
-  }
-  function hideDecoy() {
-    decoyOn = false; try { sessionStorage.removeItem("jbDecoy"); } catch (e) {}
-    $("decoy").hidden = true;
-  }
-  if (decoyOn) $("decoy").hidden = false;
+  if (decoyOn) { decoyOn = false; try { sessionStorage.removeItem("jbDecoy"); } catch (e) {} }
   (() => {
     let taps = [], armedUntil = 0, holdTimer = 0;
     const h = $("heading");
@@ -574,12 +569,11 @@
       if (navigator.vibrate) navigator.vibrate(40);
       if (devUnlocked) {
         devUnlocked = false; try { localStorage.removeItem("jbDev"); } catch (e) {}
-        toast("Broadcast controls hidden"); if (state) renderDJ(); return;
+        if (channel !== "main") switchChannel("main");
+        toast("Broadcast room hidden"); if (state) renderDJ(); return;
       }
-      const someoneLive = state && state.dj && state.dj.live;
-      if (someoneLive && !state.djTrusted && dj.state === "none") { showDecoy(); return; }
       devUnlocked = true; try { localStorage.setItem("jbDev", "1"); } catch (e) {}
-      toast("🛠 Broadcast controls unlocked");
+      toast("🛠 Broadcast room unlocked");
       if (state) renderDJ();
       $("accDj").open = true;
       setTimeout(() => $("djCard").scrollIntoView({ behavior: "smooth", block: "center" }), 50);
@@ -623,7 +617,7 @@
     const top = list.length ? list[list.length - 1].id : 0;
     if (lastPing < 0) { lastPing = top; return; } // don't replay old ones on load
     list.filter((p) => p.id > lastPing).forEach((p) => {
-      if (decoyOn) return;
+      if (p.room && !devUnlocked) return; // room news is only for people who unlocked it
       toast(p.text); chime();
       if (notifyOn && document.hidden && "Notification" in window && Notification.permission === "granted") {
         try { new Notification(state.host ? state.host + "'s Jukebox" : "Jukebox", { body: p.text }); } catch (e) {}
@@ -802,25 +796,55 @@
   });
   djMicUI();
   const DJ_FRAMES = 9600; // 200 ms per upload
+  const ago = (ms) => { const m = Math.floor((Date.now() - ms) / 60000); return m < 1 ? "just started" : m + " min"; };
+  function switchChannel(id, msg) {
+    const wasPlaying = !!audio;
+    if (audio) stopListening();
+    channel = id;
+    if (wasPlaying || id !== "main") startListening();
+    if (msg) toast(msg, 4000);
+    if (state) renderDJ();
+  }
   function renderDJ() {
-    const g = state.dj;
-    const live = g && g.live;
-    $("djLive").hidden = !live;
-    if (live) $("djLive").textContent = dj.state === "live" ? "🔴 You're live — everyone listening hears your audio" : `🎙 Live from ${g.name}`;
-    if (live && dj.state !== "live") { $("status").textContent = "🎙 " + g.name; $("status").className = "pill live"; }
-    $("djCard").hidden = !((devUnlocked && state.djEnabled) || dj.state !== "none");
-    if (decoyOn && !live) hideDecoy(); // the broadcast ended: back to the normal page
+    const room = (state.room || []).filter((c) => !c.mine);
+    const mine = (state.room || []).find((c) => c.mine);
+    $("djCard").hidden = !((devUnlocked && state.roomEnabled) || dj.state !== "none");
+    // The channel you were tuned to ended: back to the jukebox.
+    if (channel !== "main" && !room.some((c) => c.id === channel)) switchChannel("main", "That broadcast ended — back to " + (state.host || "the") + "'s Jukebox");
+    const tuned = room.find((c) => c.id === channel);
+    $("djLive").hidden = !(dj.state === "live" || tuned);
+    $("djLive").textContent = dj.state === "live" ? `🔴 You're live in the room${mine ? ` · 🎧 ${mine.listeners}` : ""}` : tuned ? `🎙 Listening to ${tuned.name}` : "";
+    $("chanHint").hidden = !tuned;
+    if (tuned) $("chanHint").textContent = `🎙 Tuned to ${tuned.name}'s broadcast — pick ${state.host || "the"}'s Jukebox in the room to switch back.`;
+    if (devUnlocked && !$("djCard").hidden) {
+      const rows = [`<div class="room-row ${channel === "main" ? "on" : ""}"><span class="dot main"></span>
+          <div class="who"><b>🎵 ${esc(state.host || "Tom")}'s Jukebox</b><span>Spotify · 🎧 ${(state.listening || []).length}</span></div>
+          <button type="button" class="secondary" data-ch="main">${channel === "main" && audio ? "Listening" : "Listen"}</button></div>`];
+      room.forEach((c) => rows.push(`<div class="room-row ${channel === c.id ? "on" : ""}"><span class="dot"></span>
+          <div class="who"><b>🎙 ${esc(c.name)}</b><span>${ago(c.since)} · 🎧 ${c.listeners}${c.names.length ? " · " + esc(c.names.slice(0, 3).join(", ")) : ""}</span></div>
+          <button type="button" data-ch="${esc(c.id)}">${channel === c.id && audio ? "Listening" : "Listen"}</button></div>`));
+      if (!room.length) rows.push(`<p class="room-empty">No friends are live right now — be the first.</p>`);
+      $("roomList").innerHTML = rows.join("");
+    }
     handlePings();
     djUI();
   }
+  $("roomList").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-ch]");
+    if (!b) return;
+    const id = b.dataset.ch;
+    if (id === channel && audio) return;
+    const c = (state.room || []).find((x) => x.id === id);
+    switchChannel(id, id === "main" ? null : `Tuning in to ${c ? c.name : "the broadcast"}…`);
+  });
   function djUI(msg) {
     const b = $("djBtn");
     b.classList.toggle("live", dj.state === "live");
-    b.textContent = { none: "🎙 Broadcast my audio", pending: "Cancel request", approved: "Starting…", live: "⏹ Stop broadcasting" }[dj.state];
-    b.disabled = dj.state === "approved";
-    $("djSum").textContent = { none: "Share your audio", pending: "Waiting for approval…", approved: "Starting…", live: "🔴 You're live" }[dj.state];
-    $("djSum").classList.toggle("on", dj.state !== "none");
-    if (dj.state !== "none") $("accDj").open = true; // keep it visible while waiting or on air
+    b.textContent = { none: "🎙 Go live", starting: "Starting…", live: "⏹ Stop broadcasting" }[dj.state];
+    b.disabled = dj.state === "starting";
+    $("djSum").textContent = dj.state === "live" ? "🔴 You're live" : (state && state.room && state.room.length ? `${state.room.length} live` : "Nobody live");
+    $("djSum").classList.toggle("on", dj.state === "live" || !!(state && state.room && state.room.length));
+    if (dj.state !== "none") $("accDj").open = true;
     if (msg) $("djHint").textContent = msg;
   }
   async function djStart() {
@@ -846,29 +870,15 @@
           djUI("The microphone was blocked — broadcasting the shared sound only.");
         }
       }
-      try { await post("api/dj/request", { name: $("name").value }); }
-      catch (e) { if (/offline/i.test(e.message)) { stream.getTracks().forEach((t) => t.stop()); dj.stream = null; showDecoy(); return; } throw e; }
-      dj.state = "pending";
-      djUI(`Waiting for ${state && state.host ? state.host : "the host"} to approve…`);
-      dj.poll = setInterval(djPoll, 1500);
+      dj.state = "starting"; djUI("Going live…");
+      const j = await post("api/room/start", { name: $("name").value });
+      await djBegin(j.token, j.id);
     } catch (err) {
-      djStop(err && err.name === "NotAllowedError" ? "Sharing was cancelled." : (err && err.message) || "Couldn't start sharing.");
+      djStop(err && err.name === "NotAllowedError" ? "Sharing was cancelled." : (err && err.message) || "Couldn't start broadcasting.");
     }
   }
-  async function djPoll() {
-    try {
-      const r = await fetch(API + "api/dj/status", { cache: "no-store", headers: { "X-Client": client } });
-      const j = await r.json();
-      const host = state && state.host ? state.host : "The host";
-      if ((j.state === "approved" || j.state === "live") && !dj.ctx) await djBegin(j.token);
-      else if (j.state === "pending") djUI(`Waiting for ${host} to approve… (#${j.position} in line)`);
-      else if (j.state === "denied") djStop(`${host} said not right now.`, true);
-      else if (j.state === "none" && dj.state !== "pending") djStop("Your broadcast was ended.", true);
-      else if (j.state === "none") djStop("Your request expired.", true);
-    } catch (e) {}
-  }
-  async function djBegin(token) {
-    dj.token = token; dj.state = "approved"; djUI("Approved! Starting your broadcast…");
+  async function djBegin(token, id) {
+    dj.token = token; dj.id = id;
     if (audio) stopListening("Paused while you broadcast, so you don't hear yourself twice.");
     const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
     dj.ctx = ctx;
@@ -902,7 +912,7 @@
     }
     mix.connect(dj.node); dj.node.connect(sink);
     dj.state = "live";
-    djUI("You're live 🎙 — everyone listening hears your audio. Close the share or tap Stop to finish.");
+    djUI("You're live 🎙 — friends in the room can tune in. Close the share or tap Stop to finish.");
   }
   async function djSend() {
     if (dj.sending) return;
@@ -911,7 +921,7 @@
       if (dj.queue.length > 15) dj.queue.splice(0, dj.queue.length - 5); // slow connection: skip ahead
       const chunk = dj.queue.shift();
       try {
-        const r = await fetch(API + "api/dj/audio?token=" + encodeURIComponent(dj.token),
+        const r = await fetch(API + "api/room/audio?token=" + encodeURIComponent(dj.token),
                               { method: "POST", headers: { "Content-Type": "application/octet-stream", "X-Client": client }, body: chunk });
         if (r.status === 403) { djStop("Your broadcast was ended.", true); break; }
       } catch (e) {}
@@ -920,16 +930,15 @@
   }
   function djStop(msg, serverEnded) {
     const was = dj.state;
-    clearInterval(dj.poll); dj.poll = 0;
     if (dj.stream) dj.stream.getTracks().forEach((t) => t.stop());
     if (dj.mic) dj.mic.getTracks().forEach((t) => t.stop());
     if (dj.ctx) dj.ctx.close().catch(() => {});
     Object.assign(dj, { stream: null, mic: null, micGain: null, ctx: null, node: null, token: "", state: "none", queue: [], buf: null, len: 0 });
-    if (!serverEnded && was !== "none") post("api/dj/cancel").catch(() => {});
+    if (!serverEnded && was !== "none") post("api/room/stop").catch(() => {});
     djUI(msg);
     if (state) renderDJ();
   }
-  $("djBtn").addEventListener("click", () => dj.state === "none" ? djStart() : djStop(dj.state === "pending" ? "Request cancelled." : "Broadcast stopped."));
+  $("djBtn").addEventListener("click", () => dj.state === "none" ? djStart() : djStop("Broadcast stopped."));
 
   resolveAPI().then(refresh);
   setInterval(refresh, 2500);

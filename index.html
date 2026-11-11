@@ -684,9 +684,12 @@
   }
 
   // Talk rooms: WebRTC voice between browsers (mesh). MixMic only relays the set-up messages.
-  const ICE = [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }];
+  const ICE = [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }, { urls: "stun:stun.cloudflare.com:3478" }];
+  const FORCE_RELAY = /[?&]relay\b/.test(location.search); // testing aid: skip the direct connection
+  const RELAY_AFTER = 8000; // ms to wait for a direct connection before relaying voices through MixMic
   const talk = { room: null, peer: null, title: "", mic: null, ctx: null, local: null, peers: new Map(), poll: 0, meter: 0,
-                 muted: false, vol: 1, busy: false, names: {}, localSpeaking: false };
+                 muted: false, vol: 1, busy: false, names: {}, localSpeaking: false,
+                 relay: { on: false, node: null, sink: null, buf: null, len: 0, up: [], sending: false, since: 0, hearing: false, timer: 0 } };
   try { talk.vol = parseFloat(localStorage.getItem("jbTalkVol") || "1"); $("talkDuck").checked = localStorage.getItem("jbTalkDuck") !== "0"; } catch (e) {}
   $("talkVol").value = talk.vol;
   const talkSay = (t, k) => { $("talkMsg").textContent = t || ""; $("talkMsg").className = "msg " + (k || ""); };
@@ -709,7 +712,8 @@
     const tiles = [`<div class="person ${talk.localSpeaking ? "speaking" : ""}"><span class="av">${esc(initials($("name").value || "You"))}</span>
         <span class="nm">You<span class="st">${talk.muted ? "🔇 muted" : "🎙 on"}</span></span></div>`];
     talk.peers.forEach((p, id) => {
-      const st = p.state === "connected" ? (p.muted ? "🔇 muted" : "🎙 on") : p.state === "failed" ? "⚠️ can't connect" : "connecting…";
+      const st = p.state === "connected" ? (p.muted ? "🔇 muted" : "🎙 on")
+               : p.state === "relay" ? (p.muted ? "🔇 muted" : "🎙 on · via relay") : "connecting…";
       tiles.push(`<div class="person ${p.speaking ? "speaking" : ""}"><span class="av">${esc(initials(p.name))}</span>
           <span class="nm">${esc(p.name)}<span class="st">${st}</span></span></div>`);
     });
@@ -735,18 +739,29 @@
         p.analyser = a;
       } catch (err) {}
     };
-    pc.onconnectionstatechange = () => { p.state = pc.connectionState === "connected" ? "connected" : pc.connectionState === "failed" ? "failed" : p.state; renderPeople(); };
+    pc.onconnectionstatechange = () => {
+      if (p.relay) return;
+      if (pc.connectionState === "connected") { p.state = "connected"; clearTimeout(p.timer); }
+      else if (pc.connectionState === "failed") goRelay(id, true);
+      renderPeople();
+    };
+    // Some networks (offices, hotspots) block direct browser connections: fall back to the MixMic relay.
+    p.timer = setTimeout(() => { if (p.state !== "connected") goRelay(id, true); }, FORCE_RELAY ? 0 : RELAY_AFTER);
     talk.peers.set(id, p);
     return p;
   }
   function dropPeer(id) {
     const p = talk.peers.get(id); if (!p) return;
+    clearTimeout(p.timer);
     try { p.pc.close(); } catch (e) {}
     if (p.audio) { p.audio.srcObject = null; }
+    if (p.gain) { try { p.gain.disconnect(); } catch (e) {} }
     talk.peers.delete(id);
   }
   async function handleSignal(from, data) {
     let p = talk.peers.get(from);
+    if (data.type === "relay") { if (!p) p = makePeer(from); goRelay(from, false); return; }
+    if (p && p.relay) return; // already on the relay; ignore late connection messages
     try {
       if (data.type === "offer") {
         if (!p) p = makePeer(from);
@@ -757,12 +772,96 @@
       } else if (data.type === "answer" && p) {
         await p.pc.setRemoteDescription({ type: "answer", sdp: data.sdp });
         for (const c of p.pending.splice(0)) await p.pc.addIceCandidate(c).catch(() => {});
-      } else if (data.type === "candidate" && p) {
+      } else if (data.type === "candidate") {
+        if (!p) p = makePeer(from); // a candidate can overtake its offer on the way here
         if (p.pc.remoteDescription) await p.pc.addIceCandidate(data.candidate).catch(() => {});
         else p.pending.push(data.candidate);
       }
     } catch (e) {}
   }
+  // ---- Relay fallback: 16 kHz µ-law chunks uploaded to MixMic and fetched by the others ----
+  const RELAY_RATE = 16000, RELAY_CHUNK = 2560; // 160 ms
+  function muEnc(x) {
+    let v = Math.max(-1, Math.min(1, x)) * 32635; const sign = v < 0 ? 0x80 : 0; if (sign) v = -v;
+    v += 132; let exp = 7; for (let m = 0x4000; (v & m) === 0 && exp > 0; m >>= 1) exp--;
+    return ~(sign | (exp << 4) | ((v >> (exp + 3)) & 0x0f)) & 0xff;
+  }
+  const MU_DEC = new Float32Array(256).map((_, i) => {
+    const u = ~i & 0xff, sign = u & 0x80, exp = (u >> 4) & 7, man = u & 0x0f;
+    const v = (((man << 3) + 132) << exp) - 132; return (sign ? -v : v) / 32768;
+  });
+  function goRelay(id, tell) {
+    const p = talk.peers.get(id); if (!p || p.relay || !talk.room) return;
+    p.relay = true; p.state = "relay"; clearTimeout(p.timer);
+    try { p.pc.close(); } catch (e) {}
+    if (p.audio) p.audio.srcObject = null;
+    p.gain = talk.ctx.createGain(); p.gain.gain.value = talk.vol; p.gain.connect(talk.ctx.destination);
+    p.analyser = talk.ctx.createAnalyser(); p.analyser.fftSize = 512; p.gain.connect(p.analyser);
+    p.next = 0;
+    if (tell) sendSignal(id, { type: "relay" });
+    startRelay(); renderPeople();
+  }
+  async function startRelay() {
+    const R = talk.relay; if (R.on) return;
+    R.on = true; R.since = 0; R.buf = new Uint8Array(RELAY_CHUNK); R.len = 0; R.up = [];
+    const ctx = talk.ctx, ratio = ctx.sampleRate / RELAY_RATE; let pos = 0;
+    const take = (ch) => { // simple resample to 16 kHz, then µ-law
+      for (; pos < ch.length; pos += ratio) {
+        R.buf[R.len++] = muEnc(ch[Math.floor(pos)]);
+        if (R.len === RELAY_CHUNK) { if (!talk.muted) { R.up.push(R.buf); relaySend(); } R.buf = new Uint8Array(RELAY_CHUNK); R.len = 0; }
+      }
+      pos -= ch.length;
+    };
+    R.sink = ctx.createGain(); R.sink.gain.value = 0; R.sink.connect(ctx.destination);
+    const src = ctx.createMediaStreamSource(talk.mic);
+    try {
+      const code = `class T extends AudioWorkletProcessor { process(i) { const c = i[0]; if (c && c.length) this.port.postMessage(c[0].slice(0)); return true; } }
+                    registerProcessor("talk-tap", T);`;
+      await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([code], { type: "application/javascript" })));
+      R.node = new AudioWorkletNode(ctx, "talk-tap"); R.node.port.onmessage = (e) => take(e.data);
+    } catch (e) {
+      R.node = ctx.createScriptProcessor(2048, 1, 1); R.node.onaudioprocess = (e) => take(e.inputBuffer.getChannelData(0));
+    }
+    src.connect(R.node); R.node.connect(R.sink);
+    R.timer = setInterval(relayHear, 150);
+  }
+  function stopRelay() {
+    const R = talk.relay; clearInterval(R.timer);
+    try { if (R.node) R.node.disconnect(); if (R.sink) R.sink.disconnect(); } catch (e) {}
+    Object.assign(R, { on: false, node: null, sink: null, buf: null, len: 0, up: [], since: 0, timer: 0 });
+  }
+  async function relaySend() {
+    const R = talk.relay; if (R.sending) return; R.sending = true;
+    while (R.up.length && R.on && talk.room) {
+      if (R.up.length > 6) R.up.splice(0, R.up.length - 2); // slow connection: skip ahead
+      const chunk = R.up.shift();
+      try {
+        await fetch(API + `api/talk/audio?room=${encodeURIComponent(talk.room)}&peer=${encodeURIComponent(talk.peer)}`,
+                    { method: "POST", headers: { "Content-Type": "application/octet-stream", "X-Client": client }, body: chunk });
+      } catch (e) {}
+    }
+    R.sending = false;
+  }
+  async function relayHear() {
+    const R = talk.relay; if (R.hearing || !talk.room) return; R.hearing = true;
+    try {
+      const r = await fetch(API + `api/talk/hear?room=${encodeURIComponent(talk.room)}&peer=${encodeURIComponent(talk.peer)}&since=${R.since}`,
+                            { cache: "no-store", headers: { "X-Client": client } });
+      const j = await r.json();
+      if (typeof j.seq === "number") R.since = j.seq;
+      const ctx = talk.ctx;
+      for (const c of j.chunks || []) {
+        const p = talk.peers.get(c.from); if (!p || !p.relay || !ctx) continue;
+        const bin = atob(c.d), n = bin.length, buf = ctx.createBuffer(1, n, RELAY_RATE), out = buf.getChannelData(0);
+        for (let i = 0; i < n; i++) out[i] = MU_DEC[bin.charCodeAt(i)];
+        const now = ctx.currentTime;
+        if (p.next < now + 0.03 || p.next > now + 1.2) p.next = now + 0.2; // (re)start with a small cushion; drop built-up lag
+        const s = ctx.createBufferSource(); s.buffer = buf; s.connect(p.gain); s.start(p.next);
+        p.next += n / RELAY_RATE;
+      }
+    } catch (e) {} finally { R.hearing = false; }
+  }
+
   async function talkPoll() {
     if (!talk.room || talk.busy) return;
     talk.busy = true;
@@ -794,8 +893,9 @@
       for (const m of j.members) { // the newcomer calls everyone already in the room
         talk.names[m.peer] = m.name;
         const p = makePeer(m.peer, m.name);
-        await p.pc.setLocalDescription(await p.pc.createOffer());
-        sendSignal(m.peer, { type: "offer", sdp: p.pc.localDescription.sdp });
+        (async () => { // never let one person's connection hold up joining
+          try { await p.pc.setLocalDescription(await p.pc.createOffer()); if (!p.relay) sendSignal(m.peer, { type: "offer", sdp: p.pc.localDescription.sdp }); } catch (e) {}
+        })();
       }
       talk.poll = setInterval(talkPoll, 700);
       talk.meter = setInterval(talkMeter, 100);
@@ -812,6 +912,7 @@
     if (talk.room && !closed) fetch(API + "api/talk/leave", { method: "POST", keepalive: true, headers: { "Content-Type": "application/json", "X-Client": client },
                                                                body: JSON.stringify({ peer: talk.peer }) }).catch(() => {});
     [...talk.peers.keys()].forEach(dropPeer);
+    stopRelay();
     if (talk.mic) talk.mic.getTracks().forEach((t) => t.stop());
     if (talk.ctx) talk.ctx.close().catch(() => {});
     Object.assign(talk, { room: null, peer: null, title: "", mic: null, ctx: null, local: null, poll: 0, meter: 0, localSpeaking: false });
@@ -846,7 +947,7 @@
   $("talkLeave").addEventListener("click", () => talkLeave("You left the room."));
   $("talkVol").addEventListener("input", () => {
     talk.vol = parseFloat($("talkVol").value); $("talkVolTxt").textContent = Math.round(talk.vol * 100) + "%";
-    talk.peers.forEach((p) => { if (p.audio) p.audio.volume = talk.vol; });
+    talk.peers.forEach((p) => { if (p.audio) p.audio.volume = talk.vol; if (p.gain) p.gain.gain.value = talk.vol; });
     try { localStorage.setItem("jbTalkVol", talk.vol); } catch (e) {}
   });
   $("talkVolTxt").textContent = Math.round(talk.vol * 100) + "%";

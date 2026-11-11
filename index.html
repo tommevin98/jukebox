@@ -780,7 +780,7 @@
     } catch (e) {}
   }
   // ---- Relay fallback: 16 kHz µ-law chunks uploaded to MixMic and fetched by the others ----
-  const RELAY_RATE = 16000, RELAY_CHUNK = 2560; // 160 ms
+  const RELAY_RATE = 16000, RELAY_CHUNK = 960; // 60 ms
   function muEnc(x) {
     let v = Math.max(-1, Math.min(1, x)) * 32635; const sign = v < 0 ? 0x80 : 0; if (sign) v = -v;
     v += 132; let exp = 7; for (let m = 0x4000; (v & m) === 0 && exp > 0; m >>= 1) exp--;
@@ -808,7 +808,13 @@
     const take = (ch) => { // simple resample to 16 kHz, then µ-law
       for (; pos < ch.length; pos += ratio) {
         R.buf[R.len++] = muEnc(ch[Math.floor(pos)]);
-        if (R.len === RELAY_CHUNK) { if (!talk.muted) { R.up.push(R.buf); relaySend(); } R.buf = new Uint8Array(RELAY_CHUNK); R.len = 0; }
+        if (R.len === RELAY_CHUNK) {
+          if (!talk.muted) {
+            if (R.ws && R.ws.readyState === 1) { if (R.ws.bufferedAmount < 4000) R.ws.send(R.buf); } // live socket: straight out
+            else { R.up.push(R.buf); relaySend(); }
+          }
+          R.buf = new Uint8Array(RELAY_CHUNK); R.len = 0;
+        }
       }
       pos -= ch.length;
     };
@@ -824,16 +830,47 @@
     }
     src.connect(R.node); R.node.connect(R.sink);
     R.timer = setInterval(relayHear, 150);
+    R.ka = setInterval(() => { if (R.ws && R.ws.readyState === 1) R.ws.send(new Uint8Array(0)); }, 15000); // keeps the socket open while muted
+    relayConnect();
+  }
+  function relayConnect() {
+    const R = talk.relay; if (!R.on || !talk.room) return;
+    let ws;
+    try {
+      const u = new URL(API || "./", location.href); u.search = ""; u.hash = ""; const base = u.href.replace(/^http/, "ws");
+      ws = new WebSocket(base + `api/talk/ws?room=${encodeURIComponent(talk.room)}&peer=${encodeURIComponent(talk.peer)}&client=${encodeURIComponent(client)}`);
+    } catch (e) { return; }
+    ws.binaryType = "arraybuffer";
+    ws.onopen = () => { R.ws = ws; R.wsFails = 0; R.since = 0; };
+    ws.onmessage = (e) => { const b = new Uint8Array(e.data); const n = b[0]; relayPlay(String.fromCharCode(...b.subarray(1, 1 + n)), b.subarray(1 + n)); };
+    ws.onclose = () => {
+      if (R.ws === ws) R.ws = null;
+      R.wsFails = (R.wsFails || 0) + 1;
+      if (R.on && talk.room && R.wsFails < 6) setTimeout(relayConnect, 1500); // meanwhile the slower polling relay carries on
+    };
+  }
+  function relayPlay(from, bytes) {
+    const p = talk.peers.get(from), ctx = talk.ctx; if (!p || !p.relay || !ctx || !bytes.length) return;
+    const n = bytes.length, buf = ctx.createBuffer(1, n, RELAY_RATE), out = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) out[i] = MU_DEC[bytes[i]];
+    const now = ctx.currentTime;
+    if (!p.cush) p.cush = 0.08;
+    if (p.next < now) { p.cush = Math.min(0.3, p.cush + 0.03); p.next = now + p.cush; } // ran dry: buffer a little more
+    else if (p.next > now + p.cush + 0.35) p.next = now + p.cush;                     // built-up lag: jump back to live
+    else p.cush = Math.max(0.06, p.cush - 0.0005);                                     // steady: slowly tighten
+    const s = ctx.createBufferSource(); s.buffer = buf; s.connect(p.gain); s.start(p.next);
+    p.next += n / RELAY_RATE;
   }
   function stopRelay() {
-    const R = talk.relay; clearInterval(R.timer);
+    const R = talk.relay; clearInterval(R.timer); clearInterval(R.ka);
+    if (R.ws) { const w = R.ws; R.ws = null; w.onclose = null; try { w.close(); } catch (e) {} }
     try { if (R.node) R.node.disconnect(); if (R.sink) R.sink.disconnect(); } catch (e) {}
-    Object.assign(R, { on: false, node: null, sink: null, buf: null, len: 0, up: [], since: 0, timer: 0 });
+    Object.assign(R, { on: false, node: null, sink: null, buf: null, len: 0, up: [], since: 0, timer: 0, ka: 0, ws: null, wsFails: 0 });
   }
   async function relaySend() {
     const R = talk.relay; if (R.sending) return; R.sending = true;
     while (R.up.length && R.on && talk.room) {
-      if (R.up.length > 6) R.up.splice(0, R.up.length - 2); // slow connection: skip ahead
+      if (R.up.length > 10) R.up.splice(0, R.up.length - 3); // slow connection: skip ahead
       const chunk = R.up.shift();
       try {
         await fetch(API + `api/talk/audio?room=${encodeURIComponent(talk.room)}&peer=${encodeURIComponent(talk.peer)}`,
@@ -843,21 +880,19 @@
     R.sending = false;
   }
   async function relayHear() {
-    const R = talk.relay; if (R.hearing || !talk.room) return; R.hearing = true;
+    const R = talk.relay; if (R.hearing || !talk.room) return;
+    if (R.ws) { R.since = 0; return; } // the live socket is delivering; re-sync if it ever drops
+    R.hearing = true;
     try {
       const r = await fetch(API + `api/talk/hear?room=${encodeURIComponent(talk.room)}&peer=${encodeURIComponent(talk.peer)}&since=${R.since}`,
                             { cache: "no-store", headers: { "X-Client": client } });
       const j = await r.json();
       if (typeof j.seq === "number") R.since = j.seq;
-      const ctx = talk.ctx;
+      if (R.ws) return;
       for (const c of j.chunks || []) {
-        const p = talk.peers.get(c.from); if (!p || !p.relay || !ctx) continue;
-        const bin = atob(c.d), n = bin.length, buf = ctx.createBuffer(1, n, RELAY_RATE), out = buf.getChannelData(0);
-        for (let i = 0; i < n; i++) out[i] = MU_DEC[bin.charCodeAt(i)];
-        const now = ctx.currentTime;
-        if (p.next < now + 0.03 || p.next > now + 1.2) p.next = now + 0.2; // (re)start with a small cushion; drop built-up lag
-        const s = ctx.createBufferSource(); s.buffer = buf; s.connect(p.gain); s.start(p.next);
-        p.next += n / RELAY_RATE;
+        const bin = atob(c.d), b = new Uint8Array(bin.length);
+        for (let i = 0; i < b.length; i++) b[i] = bin.charCodeAt(i);
+        relayPlay(c.from, b);
       }
     } catch (e) {} finally { R.hearing = false; }
   }

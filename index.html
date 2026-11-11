@@ -249,6 +249,7 @@
         <div class="room" id="talkList" aria-label="Talk rooms"></div>
         <form class="row" id="talkForm">
           <input id="talkTitle" maxlength="40" placeholder="Name a room, e.g. Chai break" aria-label="New room name" autocomplete="off">
+          <input id="talkPass" maxlength="40" placeholder="Password (optional)" aria-label="Room password, optional" autocomplete="off" style="max-width:11rem">
           <button type="submit" id="talkCreate">Start</button>
         </form>
         <p class="hint">Everyone in a room can talk with their mic on. Voices go straight between browsers — use headphones to avoid echo.</p>
@@ -703,8 +704,8 @@
     $("talkLobby").hidden = !!talk.room; $("talkIn").hidden = !talk.room;
     if (!talk.room) {
       $("talkList").innerHTML = rooms.length ? rooms.map((r) => `<div class="room-row"><span class="dot main"></span>
-          <div class="who"><b>${esc(r.title)}</b><span>${r.count ? esc(r.names.join(", ")) : "Empty — be the first in"}</span></div>
-          <button type="button" data-room="${esc(r.id)}" ${r.count >= 8 ? "disabled" : ""}>${r.count >= 8 ? "Full" : "Join"}</button></div>`).join("")
+          <div class="who"><b>${r.locked ? "🔒 " : ""}${esc(r.title)}</b><span>${r.count ? esc(r.names.join(", ")) : "Empty — be the first in"}</span></div>
+          <button type="button" data-room="${esc(r.id)}" data-locked="${r.locked ? 1 : ""}" ${r.count >= 8 ? "disabled" : ""}>${r.count >= 8 ? "Full" : "Join"}</button></div>`).join("")
         : `<p class="room-empty">No rooms yet — start one below.</p>`;
     }
   }
@@ -897,6 +898,19 @@
     } catch (e) {} finally { R.hearing = false; }
   }
 
+  // Two quick notes: rising when someone joins, falling when someone leaves.
+  function talkChime(joined) {
+    const ctx = talk.ctx; if (!ctx) return;
+    const notes = joined ? [660, 880] : [660, 494], t0 = ctx.currentTime + 0.02;
+    notes.forEach((hz, i) => {
+      const o = ctx.createOscillator(), g = ctx.createGain(), t = t0 + i * 0.13;
+      o.type = "sine"; o.frequency.value = hz;
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.18 * Math.max(0.3, talk.vol), t + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+      o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.4);
+    });
+  }
+
   async function talkPoll() {
     if (!talk.room || talk.busy) return;
     talk.busy = true;
@@ -906,6 +920,11 @@
       const j = await r.json();
       if (j.closed) { talkLeave("The room was closed.", true); return; }
       const ids = new Set(j.members.map((m) => m.peer));
+      if (talk.known) { // a soft chime when someone joins or leaves
+        if ([...ids].some((id) => !talk.known.has(id))) talkChime(true);
+        else if ([...talk.known].some((id) => !ids.has(id))) talkChime(false);
+      }
+      talk.known = ids;
       j.members.forEach((m) => { talk.names[m.peer] = m.name; const p = talk.peers.get(m.peer); if (p) { p.name = m.name; p.muted = m.muted; } });
       [...talk.peers.keys()].forEach((id) => { if (!ids.has(id)) dropPeer(id); }); // they left
       for (const sig of j.signals) await handleSignal(sig.from, sig.data);
@@ -913,7 +932,7 @@
       renderPeople();
     } catch (e) {} finally { talk.busy = false; }
   }
-  async function talkJoin(room) {
+  async function talkJoin(room, password) {
     if (talk.room) await talkLeave();
     talkSay("Joining…");
     try {
@@ -922,8 +941,8 @@
       talk.ctx = new (window.AudioContext || window.webkitAudioContext)(); await talk.ctx.resume();
       talk.local = talk.ctx.createAnalyser(); talk.local.fftSize = 512;
       talk.ctx.createMediaStreamSource(talk.mic).connect(talk.local);
-      const j = await post("api/talk/join", { room, name: $("name").value });
-      Object.assign(talk, { room, peer: j.peer, title: j.title, muted: false });
+      const j = await post("api/talk/join", { room, name: $("name").value, password: password || "" });
+      Object.assign(talk, { room, peer: j.peer, title: j.title, muted: false, known: new Set(j.members.map((m) => m.peer)) });
       $("talkRoomTitle").textContent = j.title;
       for (const m of j.members) { // the newcomer calls everyone already in the room
         talk.names[m.peer] = m.name;
@@ -950,7 +969,7 @@
     stopRelay();
     if (talk.mic) talk.mic.getTracks().forEach((t) => t.stop());
     if (talk.ctx) talk.ctx.close().catch(() => {});
-    Object.assign(talk, { room: null, peer: null, title: "", mic: null, ctx: null, local: null, poll: 0, meter: 0, localSpeaking: false });
+    Object.assign(talk, { room: null, peer: null, title: "", mic: null, ctx: null, local: null, poll: 0, meter: 0, localSpeaking: false, known: null });
     talkSay(msg || "");
     if (state) renderTalk();
   }
@@ -968,10 +987,19 @@
     if ((any || talk.localSpeaking) && $("talkDuck").checked) af.holdUntil = Date.now() + 700; // fade the jukebox while people talk
     if (changed) renderPeople();
   }
-  $("talkList").addEventListener("click", (e) => { const b = e.target.closest("button[data-room]"); if (b) talkJoin(b.dataset.room); });
+  $("talkList").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-room]"); if (!b) return;
+    if (b.dataset.locked) { const pw = prompt("This room has a password:"); if (pw === null) return; talkJoin(b.dataset.room, pw); }
+    else talkJoin(b.dataset.room);
+  });
   $("talkForm").addEventListener("submit", async (e) => {
     e.preventDefault();
-    try { const j = await post("api/talk/create", { title: $("talkTitle").value }); $("talkTitle").value = ""; await talkJoin(j.room); }
+    try {
+      const pw = $("talkPass").value;
+      const j = await post("api/talk/create", { title: $("talkTitle").value, password: pw });
+      $("talkTitle").value = ""; $("talkPass").value = "";
+      await talkJoin(j.room, pw);
+    }
     catch (err) { talkSay(err.message, "err"); }
   });
   $("talkMute").addEventListener("click", () => {

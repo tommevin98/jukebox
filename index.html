@@ -269,6 +269,9 @@
         <label style="display:inline-flex;align-items:center;gap:6px;margin:8px 0 0;font-weight:500;color:var(--text)">
           <input type="checkbox" id="talkDuck" checked style="width:auto"> Lower the music while people talk
         </label>
+        <label style="display:inline-flex;align-items:center;gap:6px;margin:8px 0 0;font-weight:500;color:var(--text)">
+          <input type="checkbox" id="talkNoise" checked style="width:auto"> Noise cancellation <span class="hint" style="margin:0">(cuts background sound between your words)</span>
+        </label>
       </div>
       <p class="msg" id="talkMsg" role="status"></p>
     </details>
@@ -691,7 +694,8 @@
   const talk = { room: null, peer: null, title: "", mic: null, ctx: null, local: null, peers: new Map(), poll: 0, meter: 0,
                  muted: false, vol: 1, busy: false, names: {}, localSpeaking: false,
                  relay: { on: false, node: null, sink: null, buf: null, len: 0, up: [], sending: false, since: 0, hearing: false, timer: 0 } };
-  try { talk.vol = parseFloat(localStorage.getItem("jbTalkVol") || "1"); $("talkDuck").checked = localStorage.getItem("jbTalkDuck") !== "0"; } catch (e) {}
+  try { talk.vol = parseFloat(localStorage.getItem("jbTalkVol") || "1"); $("talkDuck").checked = localStorage.getItem("jbTalkDuck") !== "0";
+        $("talkNoise").checked = localStorage.getItem("jbTalkNoise") !== "0"; } catch (e) {}
   $("talkVol").value = talk.vol;
   const talkSay = (t, k) => { $("talkMsg").textContent = t || ""; $("talkMsg").className = "msg " + (k || ""); };
   const initials = (n) => (n || "?").trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
@@ -937,8 +941,9 @@
     talkSay("Joining…");
     try {
       if (!window.RTCPeerConnection || !navigator.mediaDevices) throw new Error("This browser can't do voice rooms.");
-      talk.mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      talk.raw = await navigator.mediaDevices.getUserMedia({ audio: micConstraints() });
       talk.ctx = new (window.AudioContext || window.webkitAudioContext)(); await talk.ctx.resume();
+      talk.mic = await cleanMic(talk.ctx, talk.raw); // what everyone hears: the noise-cancelled mic
       talk.local = talk.ctx.createAnalyser(); talk.local.fftSize = 512;
       talk.ctx.createMediaStreamSource(talk.mic).connect(talk.local);
       const j = await post("api/talk/join", { room, name: $("name").value, password: password || "" });
@@ -961,6 +966,50 @@
       talkLeave(err && err.name === "NotAllowedError" ? "Microphone permission was declined." : (err && err.message) || "Couldn't join the room.");
     }
   }
+  // Noise cancellation, three layers: the browser's own suppression (plus voice isolation where offered),
+  // a low-cut filter for rumble and hum, and a gate that learns the room's background level and
+  // closes between words — so keyboards, fans and chatter behind you don't reach the room.
+  const micConstraints = () => { const n = $("talkNoise").checked;
+    return { echoCancellation: true, noiseSuppression: n, autoGainControl: true, voiceIsolation: n }; };
+  async function cleanMic(ctx, raw) {
+    const src = ctx.createMediaStreamSource(raw), dest = ctx.createMediaStreamDestination();
+    const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 90; hp.Q.value = 0.7;
+    talk.hp = hp; hp.frequency.value = $("talkNoise").checked ? 90 : 20;
+    src.connect(hp);
+    try {
+      const code = `class G extends AudioWorkletProcessor {
+          constructor() { super(); this.on = true; this.floor = -60; this.hold = 0; this.g = 1; this.t = 0;
+            this.port.onmessage = (e) => { this.on = !!e.data.on; }; }
+          process(i, o) {
+            const a = i[0] && i[0][0], out = o[0]; if (!a) return true;
+            let s = 0; for (let k = 0; k < a.length; k++) s += a[k] * a[k];
+            const db = 10 * Math.log10(s / a.length + 1e-12), dt = a.length / sampleRate;
+            // background level: drops quickly to quiet moments, creeps up slowly (so speech can't push it up)
+            this.t += dt;
+            if (this.t < 1) this.floor = this.t < 0.05 ? db : this.floor + (db - this.floor) * 0.05; // first second: learn the room
+            else this.floor = db < this.floor ? this.floor + (db - this.floor) * 0.25 : this.floor + Math.min(db - this.floor, 2 * dt);
+            this.floor = Math.max(-85, Math.min(this.floor, -30));
+            if (db > this.floor + 9 && db > -60) this.hold = 0.3; else this.hold -= dt;
+            const target = !this.on || this.hold > 0 ? 1 : 0.05;
+            const c = 1 - Math.exp(-1 / (sampleRate * (target > this.g ? 0.004 : 0.15)));
+            for (let k = 0; k < a.length; k++) { this.g += (target - this.g) * c; const v = a[k] * this.g; for (const ch of out) ch[k] = v; }
+            return true;
+          } }
+        registerProcessor("talk-gate", G);`;
+      await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([code], { type: "application/javascript" })));
+      talk.gate = new AudioWorkletNode(ctx, "talk-gate", { outputChannelCount: [1] });
+      talk.gate.port.postMessage({ on: $("talkNoise").checked });
+      hp.connect(talk.gate); talk.gate.connect(dest);
+    } catch (e) { talk.gate = null; hp.connect(dest); } // older browsers: filter + built-in suppression only
+    return dest.stream;
+  }
+  $("talkNoise").addEventListener("change", () => {
+    const n = $("talkNoise").checked;
+    try { localStorage.setItem("jbTalkNoise", n ? "1" : "0"); } catch (e) {}
+    if (talk.gate) talk.gate.port.postMessage({ on: n });
+    if (talk.hp) talk.hp.frequency.value = n ? 90 : 20;
+    if (talk.raw) talk.raw.getAudioTracks().forEach((t) => t.applyConstraints(micConstraints()).catch(() => {}));
+  });
   async function talkLeave(msg, closed) {
     clearInterval(talk.poll); clearInterval(talk.meter);
     if (talk.room && !closed) fetch(API + "api/talk/leave", { method: "POST", keepalive: true, headers: { "Content-Type": "application/json", "X-Client": client },
@@ -968,8 +1017,9 @@
     [...talk.peers.keys()].forEach(dropPeer);
     stopRelay();
     if (talk.mic) talk.mic.getTracks().forEach((t) => t.stop());
+    if (talk.raw) talk.raw.getTracks().forEach((t) => t.stop());
     if (talk.ctx) talk.ctx.close().catch(() => {});
-    Object.assign(talk, { room: null, peer: null, title: "", mic: null, ctx: null, local: null, poll: 0, meter: 0, localSpeaking: false, known: null });
+    Object.assign(talk, { room: null, peer: null, title: "", mic: null, raw: null, gate: null, hp: null, ctx: null, local: null, poll: 0, meter: 0, localSpeaking: false, known: null });
     talkSay(msg || "");
     if (state) renderTalk();
   }
@@ -1004,7 +1054,7 @@
   });
   $("talkMute").addEventListener("click", () => {
     talk.muted = !talk.muted;
-    if (talk.mic) talk.mic.getAudioTracks().forEach((t) => { t.enabled = !talk.muted; });
+    [talk.mic, talk.raw].forEach((s) => s && s.getAudioTracks().forEach((t) => { t.enabled = !talk.muted; }));
     renderPeople();
   });
   $("talkLeave").addEventListener("click", () => talkLeave("You left the room."));

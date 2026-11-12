@@ -615,11 +615,11 @@
       if (devUnlocked) {
         devUnlocked = false; try { localStorage.removeItem("jbDev"); } catch (e) {}
         if (channel !== "main") switchChannel("main");
-        toast("Broadcast room hidden"); if (state) renderDJ(); return;
+        toast("Broadcast & talk rooms hidden"); if (state) { renderDJ(); renderTalk(); } return;
       }
       devUnlocked = true; try { localStorage.setItem("jbDev", "1"); } catch (e) {}
-      toast("🛠 Broadcast room unlocked");
-      if (state) renderDJ();
+      toast("🛠 Broadcast & talk rooms unlocked");
+      if (state) { renderDJ(); renderTalk(); }
       $("accDj").open = true;
       setTimeout(() => $("djCard").scrollIntoView({ behavior: "smooth", block: "center" }), 50);
     };
@@ -697,7 +697,7 @@
   const initials = (n) => (n || "?").trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
   function renderTalk() {
     const rooms = state.talk || [];
-    $("talkCard").hidden = !(state.talkEnabled || talk.room);
+    $("talkCard").hidden = !((devUnlocked && state.talkEnabled) || talk.room); // behind the same secret gesture as the broadcast room
     const people = rooms.reduce((n, r) => n + r.count, 0);
     $("talkSum").textContent = talk.room ? "🟢 You're in " + talk.title : rooms.length ? `${rooms.length} room${rooms.length === 1 ? "" : "s"} · ${people} talking` : "Nobody talking";
     $("talkSum").classList.toggle("on", !!talk.room || people > 0);
